@@ -1,0 +1,2 @@
+{"items":[{"id":"3681f0f0-78de-48b4-a32b-bc5b272231f8","project_id":"667d1f5a-dd1a-42e9-a35c-21e986b7bbc2","project_full_name":"octocat/Hello-World","state":"failed","vulnhunter_task_id":"e7115f8b-3380-480d-8c97-cdbb0cba965b","attempt":1,"fail_reason_internal":"QA injected failure: secret stack trace /var/secret/key","created_at":"2026-07-30T09:50:03.793Z","started_at":"2026-07-30T09:50:08.014Z","finished_at":"2026-07-30T09:50:38.014Z"}]}
+HTTP 200

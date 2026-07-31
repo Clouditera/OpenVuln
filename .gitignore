@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+packages/*/dist/
+packages/service/public/
+.turbo/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+
+# logs & local data
+*.log
+.data/
+coverage/
+.DS_Store
+tmp/
+/tmp/
+
+# editor / OS
+.idea/
+.vscode/
+*.swp
+
+# bossmode / internal workspace artifacts (never publish)
+.bossmode-attachments/
+.bossmode/
+*.bossmode*
+
+# local QA evidence dumps (keep docs/qa reports if intentional)
+# docs/qa/regression/

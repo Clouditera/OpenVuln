@@ -1,0 +1,2 @@
+{"error":{"code":"ERR_VALIDATION","summary":"Invalid request","context":{"field":"finding_ids","reason":"invalid_uuid","invalid_ids":["not-a-uuid"]}}}
+HTTP 422

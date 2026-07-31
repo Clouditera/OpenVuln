@@ -1,0 +1,2 @@
+{"items":[{"id":"7775775d-c071-4317-ab6c-34bd6f41b83a","finding_key":"mock-sqli-e7115f8b","severity":"high","title":"SQL Injection in query builder","cwe":"CWE-89","primary_file":"src/db/query.ts","disclosure_state":"owner_only","disclosed_at":null},{"id":"8b641081-8fad-49a1-adc7-73173aa33a77","finding_key":"mock-xss-e7115f8b","severity":"medium","title":"Reflected XSS in search parameter","cwe":"CWE-79","primary_file":"src/web/search.tsx","disclosure_state":"owner_only","disclosed_at":null}]}
+HTTP 200

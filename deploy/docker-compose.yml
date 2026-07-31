@@ -1,0 +1,39 @@
+# Local Postgres for OpenVuln.
+# IMPORTANT: never `docker compose down -v` — that drops ov_pg_data and wipes demo data.
+# Prefer: docker compose stop / start
+# To restore demo rows after a wipe: pnpm seed:demo:reset
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: openvuln
+      POSTGRES_PASSWORD: openvuln
+      POSTGRES_DB: openvuln
+    ports:
+      - "5433:5432"
+    volumes:
+      - ov_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openvuln"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Uncomment once Dockerfile is ready (step 5)
+  # service:
+  #   build:
+  #     context: ..
+  #     dockerfile: deploy/Dockerfile
+  #   ports:
+  #     - "7860:7860"
+  #   environment:
+  #     DATABASE_URL: postgresql://openvuln:openvuln@postgres:5432/openvuln
+  #     VULNHUNTER_MOCK: "true"
+  #     PORT: "7860"
+  #     SESSION_SECRET: dev-secret
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
+volumes:
+  ov_pg_data:
