@@ -20,7 +20,7 @@ export class ApiError extends Error {
 
 /**
  * Empty / unset → same-origin relative paths (VulnAgent nginx SPA + /api).
- * HF Static build sets VITE_API_BASE_URL=https://openvuln.vulnhunter.pro
+ * HF Static build: packages/web/.env.hf → VITE_API_BASE_URL=https://openvuln.clouditera.com
  */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 

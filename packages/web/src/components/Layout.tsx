@@ -12,7 +12,7 @@ export function Layout() {
   const isDeck = pathname === "/";
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-30 h-14 border-b border-line bg-surface-header/95 backdrop-blur">
+      {!isDeck && <header className="sticky top-0 z-30 h-14 border-b border-line bg-surface-header/95 backdrop-blur">
         <div className="flex h-full items-center justify-between gap-4 px-5">
           <div className="flex items-center">
             <Link
@@ -35,7 +35,7 @@ export function Layout() {
             </a>
           </div>
         </div>
-      </header>
+      </header>}
 
       <main className="flex-1">
         <Outlet />

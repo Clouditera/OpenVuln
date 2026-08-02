@@ -362,3 +362,22 @@ ssh VulnAgent 'cd ~/openvuln && docker compose up -d'
 | Secrets | Host `.env` 600 | Never in HF |
 
 **Next action:** fish provides domain → developer implements frontend API base + compose + nginx + deploy.
+
+---
+
+## Collaboration model (2026-08-02)
+
+| Repo | Role |
+|---|---|
+| **GitHub `Clouditera/OpenVuln`** | **Source of truth** — all feature work (backend + web) |
+| **HF `spaces/zai-org/OpenVuln`** | **Deploy target only** — static build output (`pnpm --filter @openvuln/web build:hf`) |
+
+Collaborator commits recovered on branch **`recover/hf-zai-landing`** (HF `8afb4cf` tip):
+- `1911ccd` Z.ai landing + HF static mode (Yuxuan.Zhang2)
+- Merged into main as `ZaiLandingPage` + `VITE_LANDING=zai` for HF builds; product site keeps full `HomePage`.
+
+### Workflow
+1. Collaborators push PRs to **GitHub**
+2. CI / developer: `pnpm --filter @openvuln/web build:hf`
+3. Publish `packages/web/dist/**` to HF Space `main` (static SDK)
+4. Product UI on VulnAgent: `pnpm --filter @openvuln/web build` → `/var/www/openvuln`
