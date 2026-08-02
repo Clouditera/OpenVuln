@@ -1,2 +1,10 @@
 export * as scanStorage from "./storage.js";
-export { startScanLoops, stopScanLoops, _internal as scanQueueInternal } from "./queue.js";
+export type { ScanJobRow } from "./storage.js";
+export {
+  startScanLoops,
+  stopScanLoops,
+  adminResyncScanJob,
+  getScanConfigView,
+  setRuntimeConcurrency,
+  _internal as scanQueueInternal,
+} from "./queue.js";

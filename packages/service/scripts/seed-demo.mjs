@@ -1,19 +1,31 @@
 #!/usr/bin/env node
 /**
- * Seed demo projects + findings for OpenVuln prototype.
+ * ARCHIVED helper — mock seed for local UI prototyping only.
  *
- * Usage:
- *   DATABASE_URL=postgresql://openvuln:openvuln@localhost:5433/openvuln node scripts/seed-demo.mjs
- *   node scripts/seed-demo.mjs --reset   # truncate then seed
+ * Demo/prod now runs against real VulnHunter + real DB findings.
+ * Refusing to run unless ALLOW_SEED_DEMO=1 to avoid wiping real data.
  *
- * Safe: does NOT drop the docker volume. Idempotent upserts by github_repo_id.
+ * Usage (explicit opt-in only):
+ *   ALLOW_SEED_DEMO=1 DATABASE_URL=... node packages/service/scripts/seed-demo.mjs
+ *   ALLOW_SEED_DEMO=1 node packages/service/scripts/seed-demo.mjs --reset
  */
 import postgres from "postgres";
 import { randomUUID } from "node:crypto";
+import { generateAdminKeyPair, encryptForAdmin, decodePublicKeyEnv } from "@openvuln/shared/crypto";
+
+if (process.env.ALLOW_SEED_DEMO !== "1") {
+  console.error(
+    "[seed-demo] Refusing to run: demo DB is real-mode.\n" +
+      "This script injects mock projects/findings and can pollute production data.\n" +
+      "If you really need it locally: ALLOW_SEED_DEMO=1 ...",
+  );
+  process.exit(2);
+}
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? "postgresql://openvuln:openvuln@localhost:5433/openvuln";
 const RESET = process.argv.includes("--reset");
+
 
 /** @type {Array<{owner:string,name:string,desc:string,lang:string,stars:number,repoId:number}>} */
 const PROJECTS = [
@@ -76,7 +88,7 @@ const CWES = [
   ["CWE-862", "Missing Authorization"],
 ];
 
-const SEVS = /** @type {const} */ (["high", "medium", "low", "info"]);
+const SEVS = /** @type {const} */ (["critical", "high", "medium", "low"]);
 
 function mulberry32(seed) {
   return () => {
@@ -94,6 +106,16 @@ function sha(seed) {
 }
 
 async function main() {
+  let publicKeyPem;
+  if (process.env.ADMIN_PUBLIC_KEY) {
+    publicKeyPem = decodePublicKeyEnv(process.env.ADMIN_PUBLIC_KEY);
+  } else {
+    const k = generateAdminKeyPair();
+    publicKeyPem = k.publicKeyPem;
+    console.log("NOTE: ephemeral seed key — export for server:");
+    console.log("ADMIN_PUBLIC_KEY=" + k.publicKeyEnv);
+  }
+
   console.log(`Connecting ${DATABASE_URL.replace(/:[^:@]+@/, ":***@")}`);
   const sql = postgres(DATABASE_URL, { max: 4 });
 
@@ -110,9 +132,7 @@ async function main() {
 
   if (RESET) {
     console.log("RESET: truncating tables…");
-    await sql`
-      TRUNCATE findings, scan_jobs, repo_access_grants, sessions, projects, github_identities CASCADE
-    `;
+    await sql`TRUNCATE findings, scan_jobs, projects CASCADE`;
   }
 
   let projectCount = 0;
@@ -176,18 +196,29 @@ async function main() {
       const key = `${p.name}-${sev}-${f + 1}`;
       const title = `${sev.toUpperCase()}: sample issue #${f + 1} in ${p.name}`;
       const disclose = rand() < 0.08; // ~8% disclosed
+      const findingId = randomUUID();
+      const primaryFile = `src/${p.name}/module_${f + 1}.ts`;
+      const enc = encryptForAdmin(publicKeyPem, findingId, {
+        title,
+        primary_file: primaryFile,
+        detail: { note: "demo detail — owner only", cwe },
+      });
       await sql`
         INSERT INTO findings (
-          project_id, scan_job_id, finding_key, severity, title, cwe, primary_file,
-          detail_json, disclosure_state, disclosed_at
+          id, project_id, scan_job_id, finding_key, severity, cwe,
+          enc_payload, disclosure_state, disclosed_at, disclosed_title,
+          item_type, poc_status
         ) VALUES (
-          ${projectId}::uuid, ${jobId}::uuid, ${key}, ${sev}, ${title}, ${cwe},
-          ${`src/${p.name}/module_${f + 1}.ts`},
-          ${JSON.stringify({ note: "demo detail — owner only" })}::jsonb,
+          ${findingId}::uuid, ${projectId}::uuid, ${jobId}::uuid, ${key}, ${sev}, ${cwe},
+          ${enc},
           ${disclose ? "disclosed" : "owner_only"},
-          ${disclose ? finishedAt : null}
+          ${disclose ? finishedAt : null},
+          ${disclose ? title : null},
+          'finding', 'confirmed'
         )
       `;
+      // Point public visibility at this completed job
+      await sql`UPDATE projects SET current_scan_job_id = ${jobId}::uuid WHERE id = ${projectId}::uuid`;
       findingCount++;
       if (disclose) disclosedCount++;
     }

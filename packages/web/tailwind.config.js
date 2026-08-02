@@ -27,10 +27,12 @@ export default {
         },
         // 功能色（规范）：严重/高危/中危/低危 + 中性 info
         sev: {
-          high:   { ink: "#C22828", bg: "#FEEDED", bar: "#F24F4F" },
-          medium: { ink: "#C24E0E", bg: "#FFF1EB", bar: "#FF733C" },
-          low:    { ink: "#8A6D0B", bg: "#FEF9EA", bar: "#F7C530" },
-          info:   { ink: "#616D7E", bg: "#F8F9FA", bar: "#BBC3CC" },
+          critical: { ink: "#8F1D1D", bg: "#F9E9E9", bar: "#C22828" },
+          high:     { ink: "#C22828", bg: "#FEEDED", bar: "#F24F4F" },
+          medium:   { ink: "#C24E0E", bg: "#FFF1EB", bar: "#FF733C" },
+          low:      { ink: "#8A6D0B", bg: "#FEF9EA", bar: "#F7C530" },
+          // info：VH 兜底档，公众 UI 不展示，仅防御保留
+          info:     { ink: "#616D7E", bg: "#F8F9FA", bar: "#BBC3CC" },
         },
         // Pulse 深色页（/pulse）：规范 N10 导航深蓝
         pulse: {

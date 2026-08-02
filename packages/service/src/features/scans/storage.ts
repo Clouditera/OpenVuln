@@ -9,12 +9,21 @@ export interface ScanJobRow {
   commit_sha: string | null;
   attempt: number;
   fail_reason_internal: string | null;
+  findings_so_far: number;
+  consecutive_failures: number;
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
 }
 
-export async function createScanJob(projectId: string, commitSha: string | null): Promise<ScanJobRow> {
+/** Accept root sql or transaction sql (postgres.js). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SqlLike = any;
+
+export async function createScanJob(
+  projectId: string,
+  commitSha: string | null,
+): Promise<ScanJobRow> {
   const db = getDb();
   const rows = await db<ScanJobRow[]>`
     INSERT INTO scan_jobs (project_id, state, commit_sha)
@@ -22,6 +31,8 @@ export async function createScanJob(projectId: string, commitSha: string | null)
     RETURNING
       id::text, project_id::text, vulnhunter_task_id::text,
       state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
       created_at, started_at, finished_at
   `;
   return rows[0];
@@ -30,26 +41,38 @@ export async function createScanJob(projectId: string, commitSha: string | null)
 export async function claimQueuedJobs(limit: number): Promise<ScanJobRow[]> {
   if (limit <= 0) return [];
   const db = getDb();
-  // FOR UPDATE SKIP LOCKED — safe for multi-instance; fine for single too
+  // Priority: projects.stars DESC, then scan_jobs.created_at ASC
   const rows = await db.begin(async (tx) => {
     const claimed = await tx<ScanJobRow[]>`
       UPDATE scan_jobs
       SET state = 'dispatching', started_at = COALESCE(started_at, now())
       WHERE id IN (
-        SELECT id FROM scan_jobs
-        WHERE state = 'queued'
-        ORDER BY created_at ASC
+        SELECT j.id
+        FROM scan_jobs j
+        JOIN projects p ON p.id = j.project_id
+        WHERE j.state = 'queued'
+        ORDER BY p.stars DESC, j.created_at ASC
         LIMIT ${limit}
-        FOR UPDATE SKIP LOCKED
+        FOR UPDATE OF j SKIP LOCKED
       )
       RETURNING
         id::text, project_id::text, vulnhunter_task_id::text,
         state, commit_sha, attempt, fail_reason_internal,
+        COALESCE(findings_so_far, 0) AS findings_so_far,
+        COALESCE(consecutive_failures, 0) AS consecutive_failures,
         created_at, started_at, finished_at
     `;
     return claimed;
   });
   return rows;
+}
+
+export async function updateFindingsSoFar(
+  id: string,
+  n: number,
+  sql: SqlLike = getDb(),
+): Promise<void> {
+  await sql`UPDATE scan_jobs SET findings_so_far = ${n} WHERE id = ${id}::uuid`;
 }
 
 export async function countInFlight(): Promise<number> {
@@ -70,6 +93,13 @@ export async function markScanning(id: string, vhTaskId: string): Promise<void> 
   `;
 }
 
+export async function setCommitSha(id: string, commitSha: string | null): Promise<void> {
+  const db = getDb();
+  await db`
+    UPDATE scan_jobs SET commit_sha = ${commitSha} WHERE id = ${id}::uuid
+  `;
+}
+
 export async function markFailed(id: string, reason: string): Promise<void> {
   const db = getDb();
   await db`
@@ -79,13 +109,76 @@ export async function markFailed(id: string, reason: string): Promise<void> {
   `;
 }
 
-export async function markCompleted(id: string): Promise<void> {
+export async function markCompleted(id: string, sql: SqlLike = getDb()): Promise<void> {
+  await sql`
+    UPDATE scan_jobs
+    SET state = 'completed', finished_at = now(), consecutive_failures = 0
+    WHERE id = ${id}::uuid
+  `;
+}
+
+/** Return a claimed job to queued for another dispatch attempt. */
+export async function requeueDispatching(id: string, reason: string): Promise<void> {
   const db = getDb();
   await db`
     UPDATE scan_jobs
-    SET state = 'completed', finished_at = now()
-    WHERE id = ${id}::uuid
+    SET state = 'queued',
+        attempt = attempt + 1,
+        fail_reason_internal = ${reason.slice(0, 2000)},
+        started_at = NULL,
+        vulnhunter_task_id = NULL
+    WHERE id = ${id}::uuid AND state = 'dispatching'
   `;
+}
+
+export async function bumpConsecutiveFailures(id: string): Promise<number> {
+  const db = getDb();
+  const rows = await db<{ n: number }[]>`
+    UPDATE scan_jobs
+    SET consecutive_failures = consecutive_failures + 1
+    WHERE id = ${id}::uuid
+    RETURNING consecutive_failures AS n
+  `;
+  return Number(rows[0]?.n ?? 0);
+}
+
+export async function resetConsecutiveFailures(id: string): Promise<void> {
+  const db = getDb();
+  await db`UPDATE scan_jobs SET consecutive_failures = 0 WHERE id = ${id}::uuid`;
+}
+
+export async function setCurrentScanJob(
+  projectId: string,
+  scanJobId: string,
+  sql: SqlLike = getDb(),
+): Promise<void> {
+  await sql`
+    UPDATE projects
+    SET current_scan_job_id = ${scanJobId}::uuid
+    WHERE id = ${projectId}::uuid
+  `;
+}
+
+/** Move failed job back to scanning so poller can resync a completed VH task. */
+export async function reviveFailedForResync(id: string): Promise<ScanJobRow | null> {
+  const db = getDb();
+  const rows = await db<ScanJobRow[]>`
+    UPDATE scan_jobs
+    SET state = 'scanning',
+        fail_reason_internal = NULL,
+        finished_at = NULL,
+        consecutive_failures = 0
+    WHERE id = ${id}::uuid
+      AND state = 'failed'
+      AND vulnhunter_task_id IS NOT NULL
+    RETURNING
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+  `;
+  return rows[0] ?? null;
 }
 
 export async function listScanningJobs(): Promise<ScanJobRow[]> {
@@ -94,6 +187,8 @@ export async function listScanningJobs(): Promise<ScanJobRow[]> {
     SELECT
       id::text, project_id::text, vulnhunter_task_id::text,
       state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
       created_at, started_at, finished_at
     FROM scan_jobs
     WHERE state = 'scanning' AND vulnhunter_task_id IS NOT NULL
@@ -107,6 +202,8 @@ export async function getLatestScanForProject(projectId: string): Promise<ScanJo
     SELECT
       id::text, project_id::text, vulnhunter_task_id::text,
       state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
       created_at, started_at, finished_at
     FROM scan_jobs
     WHERE project_id = ${projectId}::uuid
@@ -122,6 +219,8 @@ export async function getScanJob(id: string): Promise<ScanJobRow | null> {
     SELECT
       id::text, project_id::text, vulnhunter_task_id::text,
       state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
       created_at, started_at, finished_at
     FROM scan_jobs WHERE id = ${id}::uuid
   `;
@@ -136,12 +235,16 @@ export async function retryScanJob(id: string): Promise<ScanJobRow | null> {
         attempt = attempt + 1,
         fail_reason_internal = NULL,
         vulnhunter_task_id = NULL,
+        findings_so_far = 0,
+        consecutive_failures = 0,
         started_at = NULL,
         finished_at = NULL
     WHERE id = ${id}::uuid AND state = 'failed'
     RETURNING
       id::text, project_id::text, vulnhunter_task_id::text,
       state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
       created_at, started_at, finished_at
   `;
   return rows[0] ?? null;
@@ -155,6 +258,8 @@ export async function listQueue(limit = 100): Promise<
     SELECT
       j.id::text, j.project_id::text, j.vulnhunter_task_id::text,
       j.state, j.commit_sha, j.attempt, j.fail_reason_internal,
+      COALESCE(j.findings_so_far, 0) AS findings_so_far,
+      COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
       j.created_at, j.started_at, j.finished_at,
       p.full_name AS project_full_name
     FROM scan_jobs j
@@ -167,6 +272,7 @@ export async function listQueue(limit = 100): Promise<
         WHEN 'queued' THEN 2
         ELSE 3
       END,
+      p.stars DESC,
       j.created_at ASC
     LIMIT ${limit}
   `;

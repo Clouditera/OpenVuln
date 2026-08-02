@@ -18,12 +18,14 @@
     "@hono/node-server": "^1.13.7",
     "@openvuln/shared": "workspace:*",
     "hono": "^4.7.4",
+    "js-yaml": "^5.2.3",
     "jszip": "^3.10.1",
     "pino": "^9.6.0",
     "postgres": "^3.4.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.9"

@@ -1,26 +1,27 @@
-import { CircleAlert, Info, OctagonAlert, TriangleAlert } from "lucide-react";
+import { CircleAlert, OctagonAlert, Siren, TriangleAlert } from "lucide-react";
 import type { Severity } from "@openvuln/shared";
 import { severityLabel } from "../shared/lib/format";
 
 const icon = {
+  critical: Siren,
   high: OctagonAlert,
   medium: TriangleAlert,
   low: CircleAlert,
-  info: Info,
 } as const;
 
 const cls = {
+  critical: "bg-sev-critical-bg text-sev-critical-ink",
   high: "bg-sev-high-bg text-sev-high-ink",
   medium: "bg-sev-medium-bg text-sev-medium-ink",
   low: "bg-sev-low-bg text-sev-low-ink",
-  info: "bg-sev-info-bg text-sev-info-ink",
 } as const;
 
 export function SeverityChip({ severity }: { severity: Severity }) {
-  const Icon = icon[severity];
+  const Icon = icon[severity] ?? CircleAlert;
+  const style = cls[severity] ?? cls.low;
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${cls[severity]}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${style}`}
     >
       <Icon size={12} strokeWidth={2} />
       {severityLabel(severity)}

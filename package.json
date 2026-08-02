@@ -6,8 +6,9 @@
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "test": "turbo run test",
-    "seed:demo": "pnpm --filter @openvuln/service run seed:demo",
-    "seed:demo:reset": "pnpm --filter @openvuln/service run seed:demo:reset",
+    "seed:demo": "echo 'seed:demo archived — real VH mode. Use ALLOW_SEED_DEMO=1 only for local mock.' && exit 2",
+    "seed:demo:reset": "echo 'seed:demo:reset archived — real VH mode. Use ALLOW_SEED_DEMO=1 only for local mock.' && exit 2",
+    "vh:smoke": "node scripts/vh-smoke.mjs",
     "lint": "biome check .",
     "format": "biome format --write .",
     "clean": "turbo run clean && rm -rf node_modules"

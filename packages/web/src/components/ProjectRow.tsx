@@ -31,7 +31,9 @@ function OwnerAvatar({ owner }: { owner: string }) {
 
 export function ProjectRow({ project }: { project: ProjectCard }) {
   const state = project.latest_scan?.state;
-  const scanning = state === "scanning" || state === "queued" || state === "dispatching";
+  const scanning = state === "scanning" || state === "dispatching";
+  const waiting = state !== "completed" && !scanning;
+  const soFar = project.latest_scan?.findings_so_far ?? 0;
   const findings = totalFindings(project.severity_counts);
 
   return (
@@ -69,7 +71,7 @@ export function ProjectRow({ project }: { project: ProjectCard }) {
                     <span>scanned {formatRelativeTime(project.latest_scan.finished_at)}</span>
                   </>
                 )}
-                {!scanning && findings > 0 && (
+                {!waiting && findings > 0 && (
                   <>
                     <span>·</span>
                     <span className="font-mono">{findings} findings</span>
@@ -78,7 +80,11 @@ export function ProjectRow({ project }: { project: ProjectCard }) {
               </div>
               <div className="mt-2.5">
                 {scanning ? (
-                  <div className="h-1.5 w-40 animate-pulse rounded-full bg-surface-sunken motion-reduce:animate-none" />
+                  <span className="text-[13px] font-medium text-running-ink">
+                    {soFar > 0 ? `Scanning · ${soFar} findings so far` : "Scanning…"}
+                  </span>
+                ) : waiting ? (
+                  <span className="text-[13px] text-ink-tertiary">In scan queue</span>
                 ) : (
                   <SeverityBar
                     counts={project.severity_counts}

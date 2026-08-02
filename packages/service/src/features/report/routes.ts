@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { AppError } from "../../middleware/error-handler.js";
+import { findingsStorage } from "../findings/index.js";
 import * as service from "./service.js";
 
 /**
@@ -7,7 +8,8 @@ import * as service from "./service.js";
  * Mounted at /api/projects/:id/report
  *
  * GET /                         ?format=markdown|json|zip
- * GET /:findingKey              ?format=markdown|json
+ * GET /:findingKey              default: full markdown from report.yaml
+ *                               ?format=markdown|yaml|json|zip|markdown-summary
  */
 export const reportRouter = new Hono();
 
@@ -42,7 +44,6 @@ reportRouter.get("/", async (c) => {
 
   if (format === "zip") {
     const zip = await service.buildZipBundle(report);
-    // Copy into a fresh ArrayBuffer-backed Uint8Array for Response body typing
     const bytes = new Uint8Array(zip.byteLength);
     bytes.set(zip);
     return attachment(bytes, {
@@ -64,34 +65,80 @@ reportRouter.get("/", async (c) => {
   });
 });
 
-// Single disclosed finding report
+// Single disclosed finding
 reportRouter.get("/:findingKey", async (c) => {
   const projectId = c.req.param("id")!;
   const findingKey = decodeURIComponent(c.req.param("findingKey")!);
   const formatRaw = (c.req.query("format") ?? "markdown").toLowerCase();
-  if (formatRaw !== "markdown" && formatRaw !== "json") {
+  if (
+    formatRaw !== "yaml" &&
+    formatRaw !== "markdown" &&
+    formatRaw !== "md" &&
+    formatRaw !== "json" &&
+    formatRaw !== "zip" &&
+    formatRaw !== "markdown-summary"
+  ) {
     throw new AppError("ERR_VALIDATION", {
       field: "format",
       reason: "invalid_format",
-      message: "format must be markdown or json",
+      message: "format must be markdown, yaml, json, zip, or markdown-summary",
     });
   }
 
   const report = await service.buildSingleFindingReport(projectId, findingKey);
-  const filename = service.singleFilenameFor(
-    report,
-    formatRaw as "markdown" | "json",
-  );
+  const safeKey = findingKey.replace(/[^A-Za-z0-9._-]+/g, "-");
+  const yaml = await findingsStorage.getDisclosedReportYaml(projectId, findingKey);
 
-  if (formatRaw === "json") {
-    return attachment(JSON.stringify(report, null, 2), {
-      contentType: "application/json; charset=utf-8",
-      filename,
+  if (formatRaw === "yaml") {
+    if (!yaml) {
+      throw new AppError("ERR_NOT_FOUND", {
+        resource: "report_yaml",
+        reason: "no_fidelity_payload",
+        message:
+          "Original report.yaml not available for this disclosure (re-disclose with fidelity pack).",
+      });
+    }
+    return attachment(yaml, {
+      contentType: "application/yaml; charset=utf-8",
+      filename: `${safeKey}.report.yaml`,
     });
   }
 
-  return attachment(service.renderSingleMarkdown(report), {
+  if (formatRaw === "zip") {
+    const { bytes, filename } = await service.buildSingleFindingZip(projectId, findingKey);
+    const out = new Uint8Array(bytes.byteLength);
+    out.set(bytes);
+    return attachment(out, { contentType: "application/zip", filename });
+  }
+
+  if (formatRaw === "json") {
+    const structured = service.buildDisclosedFindingDetail(report, yaml);
+    return attachment(JSON.stringify(structured, null, 2), {
+      contentType: "application/json; charset=utf-8",
+      filename: `${safeKey}.report.json`,
+    });
+  }
+
+  if (formatRaw === "markdown-summary") {
+    return attachment(service.renderSingleMarkdown(report), {
+      contentType: "text/markdown; charset=utf-8",
+      filename: service.singleFilenameFor(report, "markdown"),
+    });
+  }
+
+  // default markdown = full report from yaml (information-equivalent)
+  if (!yaml) {
+    return attachment(service.renderSingleMarkdown(report), {
+      contentType: "text/markdown; charset=utf-8",
+      filename: `${safeKey}.report.md`,
+    });
+  }
+  const md = service.renderFullReportMarkdown(yaml, {
+    findingKey,
+    projectFullName: report.project.full_name,
+  });
+  return attachment(md, {
     contentType: "text/markdown; charset=utf-8",
-    filename,
+    filename: `${safeKey}.report.md`,
   });
 });

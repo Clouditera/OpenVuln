@@ -18,10 +18,11 @@ export function initVulnHunterClient(config: ServiceConfig): VulnHunterClient {
     if (!config.vulnhunter.apiToken) {
       throw new Error("VULNHUNTER_API_TOKEN required when AUTH_MODE=token");
     }
-    logger.info("VulnHunter client: TOKEN mode");
+    logger.info({ baseUrl: config.vulnhunter.baseUrl }, "VulnHunter client: TOKEN mode");
     _client = new TokenVulnHunterClient({
       baseUrl: config.vulnhunter.baseUrl,
       apiToken: config.vulnhunter.apiToken,
+      defaultCredentialId: config.vulnhunter.credentialId || undefined,
     });
   } else {
     if (!config.vulnhunter.username || !config.vulnhunter.password) {

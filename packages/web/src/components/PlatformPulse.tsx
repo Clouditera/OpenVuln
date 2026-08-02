@@ -7,14 +7,14 @@ const SEV = {
   high: "#F24F4F",
   medium: "#FF733C",
   low: "#F7C530",
-  info: "#BBC3CC",
+  critical: "#C22828",
 } as const;
 
 type Pt = TrendDay;
 
 function stackedAreas(data: Pt[], w = 560, h = 180) {
-  const keys = ["high", "medium", "low", "info"] as const;
-  const max = Math.max(...data.map((d) => d.high + d.medium + d.low + d.info), 1);
+  const keys = ["critical", "high", "medium", "low"] as const;
+  const max = Math.max(...data.map((d) =>  (d.critical??0)+d.high+d.medium+d.low ), 1);
   const x = (i: number) => (data.length <= 1 ? 0 : (i / (data.length - 1)) * w);
   const y = (v: number) => h - (v / max) * (h - 16);
   const acc = data.map(() => 0);
@@ -74,14 +74,14 @@ export function PlatformPulse({ stats }: { stats: OverviewStats | undefined }) {
     }
   }, [layers, reduced]);
 
-  const sevTotals = stats?.severity_counts ?? { high: 0, medium: 0, low: 0, info: 0 };
+  const sevTotals = stats?.severity_counts ?? { critical: 0, high: 0, medium: 0, low: 0 };
   const live = stats?.live;
   const scanningCount = live?.scanning.length ?? 0;
   const queuedCount = live?.queued_count ?? 0;
   const cweTop = stats?.cwe_top ?? [];
   const cweMax = Math.max(1, ...cweTop.map((c) => c.count));
   const hasFindings =
-    (stats?.finding_total ?? 0) > 0 || trend.some((d) => d.high + d.medium + d.low + d.info > 0);
+    (stats?.finding_total ?? 0) > 0 || trend.some((d) =>  (d.critical??0)+d.high+d.medium+d.low  > 0);
 
   const xTicks = useMemo(() => {
     if (trend.length < 2) return [];

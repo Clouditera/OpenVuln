@@ -18,8 +18,10 @@ async function main(): Promise<void> {
 
   const app = createApp(config);
 
-  const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
-    logger.info({ port: info.port }, "OpenVuln listening");
+  // HF Docker Space + containers: must bind 0.0.0.0 (entrypoint sets HOST)
+  const hostname = process.env.HOST?.trim() || "0.0.0.0";
+  const server = serve({ fetch: app.fetch, port: config.port, hostname }, (info) => {
+    logger.info({ port: info.port, hostname }, "OpenVuln listening");
   });
 
   const shutdown = async (signal: string) => {

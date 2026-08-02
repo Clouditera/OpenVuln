@@ -1,19 +1,16 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { serveStatic } from "@hono/node-server/serve-static";
-import type { ServiceConfig } from "./infra/config.js";
-import { injectUser, errorHandler } from "./middleware/index.js";
-import { authRouter, meRouter } from "./features/auth/index.js";
-import { projectsRouter } from "./features/projects/index.js";
-import { findingsRouter } from "./features/findings/index.js";
-import { disclosureRouter } from "./features/disclosure/index.js";
 import { adminRouter } from "./features/admin/index.js";
-import { statsRouter } from "./features/stats/index.js";
+import { projectsRouter } from "./features/projects/index.js";
 import { reportRouter } from "./features/report/index.js";
+import { statsRouter } from "./features/stats/index.js";
+import type { ServiceConfig } from "./infra/config.js";
 import { logger } from "./infra/logger.js";
+import { errorHandler } from "./middleware/index.js";
 
 function resolvePublicRoot(): string | null {
   const candidates = [
@@ -37,23 +34,27 @@ export function createApp(config: ServiceConfig): Hono {
     await next();
   });
 
+  // CORS whitelist (CORS_ALLOWED_ORIGINS). Empty → no reflected Origin (same-origin OK).
+  // "*" alone → open origin, credentials off (local/dev only).
+  const allowed = new Set(config.corsAllowedOrigins);
+  const openCors = allowed.has("*") && allowed.size === 1;
   app.use(
     "*",
     cors({
-      origin: (origin) => origin || "*",
-      credentials: true,
+      origin: (origin) => {
+        if (!origin) return origin || "";
+        if (openCors) return "*";
+        if (allowed.has(origin)) return origin;
+        return "";
+      },
+      credentials: !openCors,
     }),
   );
-  app.use("*", injectUser);
 
   app.get("/health", (c) => c.json({ ok: true, service: "openvuln" }));
 
-  app.route("/api/auth", authRouter);
-  app.route("/api/me", meRouter);
   app.route("/api/stats", statsRouter);
 
-  app.route("/api/projects/:id/findings", findingsRouter);
-  app.route("/api/projects/:id/disclose", disclosureRouter);
   // Public disclosed report (no auth) — mount before /:owner/:repo
   app.route("/api/projects/:id/report", reportRouter);
   app.route("/api/projects", projectsRouter);

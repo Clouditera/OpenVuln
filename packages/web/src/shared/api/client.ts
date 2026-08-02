@@ -1,14 +1,9 @@
 import type {
-  MeResponse,
   OverviewStats,
   ProjectListResponse,
   ProjectPublicView,
   SubmitProjectRequest,
   SubmitProjectResponse,
-  FindingListResponse,
-  FindingDetail,
-  DiscloseRequest,
-  DiscloseResponse,
 } from "@openvuln/shared";
 
 export class ApiError extends Error {
@@ -71,20 +66,4 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  me: () => request<MeResponse>("/api/me"),
-  logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
-  listFindings: (projectId: string) =>
-    request<FindingListResponse>(`/api/projects/${projectId}/findings`),
-  getFinding: (projectId: string, key: string) =>
-    request<FindingDetail>(`/api/projects/${projectId}/findings/${encodeURIComponent(key)}`),
-  disclose: (projectId: string, body: DiscloseRequest) =>
-    request<DiscloseResponse>(`/api/projects/${projectId}/disclose`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
 };
-
-export function githubLoginUrl(project?: string): string {
-  const q = project ? `?project=${encodeURIComponent(project)}` : "";
-  return `/api/auth/github/login${q}`;
-}

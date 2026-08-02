@@ -35,21 +35,20 @@ function useCountUp(target: number, ms = 600): number {
   return val;
 }
 
+/** HeroStats — three restrained counters (fish No.248). */
 export function HeroStats({ stats }: { stats: OverviewStats | undefined }) {
   const projects = useCountUp(stats?.project_count ?? 0);
   const findings = useCountUp(stats?.finding_total ?? 0);
-  const poc = useCountUp(Math.round((stats?.poc_rate ?? 0) * 100));
-  const cwes = useCountUp(stats?.cwe_count ?? 0);
+  const disclosed = useCountUp(stats?.finding_disclosed_count ?? 0);
 
   const items = [
     { value: projects.toLocaleString(), label: "Projects scanned" },
-    { value: findings.toLocaleString(), label: "Findings confirmed" },
-    { value: `${poc}%`, label: "PoC-verified" },
-    { value: cwes.toLocaleString(), label: "CWE categories" },
+    { value: findings.toLocaleString(), label: "Findings found" },
+    { value: disclosed.toLocaleString(), label: "Findings disclosed" },
   ];
 
   return (
-    <div className="mx-auto grid max-w-3xl grid-cols-2 gap-6 sm:grid-cols-4 sm:gap-4">
+    <div className="mx-auto grid max-w-3xl grid-cols-3 gap-6 sm:gap-4">
       {items.map((it) => (
         <div key={it.label} className="text-center">
           <p className="font-display text-3xl font-bold tabular-nums tracking-tight text-ink sm:text-4xl">

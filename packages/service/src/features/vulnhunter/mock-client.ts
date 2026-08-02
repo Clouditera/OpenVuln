@@ -1,18 +1,26 @@
 import { randomUUID } from "node:crypto";
-import type { VulnHunterClient, VhFindingMeta, VhTaskState } from "./client.js";
+import type {
+  VulnHunterClient,
+  VhArtifactFilePreview,
+  VhFindingArtifactGroups,
+  VhFindingMeta,
+  VhTaskState,
+} from "./client.js";
+
+/** Soft cap for harvested text (bytes of UTF-8). */
+export const MOCK_ARTIFACT_MAX_CHARS = 1_000_000;
 
 interface MockTask {
   state: VhTaskState;
   createdAt: number;
   gitUrl: string;
   findings: VhFindingMeta[];
-  /** When true, getTask will not auto-advance state. */
   forced?: boolean;
 }
 
 /**
- * In-process mock: tasks auto-complete after ~5s with 2 sample findings.
- * Enabled via VULNHUNTER_MOCK=true.
+ * In-process mock. Findings appear while running (so_far) and complete after ~5s.
+ * Includes CVSS scores for NVD mapping tests.
  */
 export class MockVulnHunterClient implements VulnHunterClient {
   private tasks = new Map<string, MockTask>();
@@ -22,26 +30,82 @@ export class MockVulnHunterClient implements VulnHunterClient {
     this.completeAfterMs = opts?.completeAfterMs ?? 5_000;
   }
 
-  async createScanTask(input: { gitUrl: string; displayName: string }): Promise<{ taskId: string }> {
+  async createScanTask(input: {
+    gitUrl: string;
+    displayName: string;
+    [extra: string]: unknown;
+  }): Promise<{ taskId: string }> {
+    return this.spawnTask(input.gitUrl);
+  }
+
+  async createScanTaskFromArchive(input: {
+    displayName: string;
+    archive: Buffer;
+    filename: string;
+    [extra: string]: unknown;
+  }): Promise<{ taskId: string }> {
+    if (!input.archive?.length) throw new Error("Mock VH: empty archive");
+    return this.spawnTask(`archive://${input.filename}`);
+  }
+
+  private async spawnTask(gitUrl: string): Promise<{ taskId: string }> {
     const taskId = randomUUID();
     this.tasks.set(taskId, {
       state: "queued",
       createdAt: Date.now(),
-      gitUrl: input.gitUrl,
+      gitUrl,
+      // Stable finding_key values (no task id) so rescan/retry preserves disclosure by key.
       findings: [
         {
-          key: `mock-sqli-${taskId.slice(0, 8)}`,
+          key: "mock-rce",
+          severity: "high",
+          title: "Remote code execution via deserialization",
+          cwe: "CWE-502",
+          primary_file: "src/serde/handler.ts",
+          item_type: "finding",
+          poc_status: "confirmed",
+          cvss_score: 9.8,
+          cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        },
+        {
+          key: "mock-sqli",
           severity: "high",
           title: "SQL Injection in query builder",
           cwe: "CWE-89",
           primary_file: "src/db/query.ts",
+          item_type: "finding",
+          poc_status: "confirmed",
+          cvss_score: 8.1,
+          cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
         },
         {
-          key: `mock-xss-${taskId.slice(0, 8)}`,
+          key: "mock-xss",
           severity: "medium",
           title: "Reflected XSS in search parameter",
           cwe: "CWE-79",
           primary_file: "src/web/search.tsx",
+          item_type: "finding",
+          poc_status: "not-needed",
+          cvss_score: 5.4,
+          cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+        },
+        {
+          key: "mock-risk",
+          severity: "low",
+          title: "Risk item should be filtered",
+          cwe: "CWE-200",
+          item_type: "risk",
+          poc_status: "unknown",
+          cvss_score: 3.1,
+        },
+        {
+          key: "mock-failed-poc",
+          severity: "high",
+          title: "Failed poc should be filtered",
+          cwe: "CWE-78",
+          item_type: "finding",
+          poc_status: "failed",
+          cvss_score: 7.5,
         },
       ],
     });
@@ -66,8 +130,9 @@ export class MockVulnHunterClient implements VulnHunterClient {
   async listFindings(taskId: string): Promise<VhFindingMeta[]> {
     const t = this.tasks.get(taskId);
     if (!t) throw new Error(`Mock VH: unknown task ${taskId}`);
-    if (t.state !== "completed") return [];
-    return t.findings;
+    // While running, expose partial findings so so_far works
+    if (t.state === "running" || t.state === "completed") return t.findings;
+    return [];
   }
 
   async getFindingDetail(taskId: string, key: string): Promise<unknown> {
@@ -81,10 +146,97 @@ export class MockVulnHunterClient implements VulnHunterClient {
       title: meta.title,
       cwe: meta.cwe,
       primary_file: meta.primary_file,
-      description: `Mock finding detail for ${meta.title}. Powered by VulnHunter AI engine.`,
+      item_type: meta.item_type,
+      poc_status: meta.poc_status,
+      cvss_score: meta.cvss_score,
+      cvss_vector: meta.cvss_vector,
+      description: `Mock finding detail for ${meta.title}.`,
       code_snippet: `// vulnerable code at ${meta.primary_file}\nfunction handle(input) {\n  // ...\n}`,
-      line_start: 42,
-      line_end: 48,
+    };
+  }
+
+  async listFindingArtifacts(
+    taskId: string,
+    findingId: string,
+  ): Promise<VhFindingArtifactGroups> {
+    const t = this.tasks.get(taskId);
+    if (!t) throw new Error(`Mock VH: unknown task ${taskId}`);
+    const meta = t.findings.find((f) => f.key === findingId);
+    if (!meta || meta.item_type === "risk") {
+      return { poc: { files: [] }, exp: { files: [] } };
+    }
+    // confirmed findings get a text poc; others empty (mirrors pending reality)
+    if (meta.poc_status === "confirmed") {
+      return {
+        poc: {
+          files: [
+            {
+              path: `poc/poc.md`,
+              size: 120,
+              kind: "text",
+              previewable: true,
+            },
+          ],
+        },
+        exp: {
+          files:
+            meta.key === "mock-rce"
+              ? [{ path: `exp/exp.py`, size: 80, kind: "text", previewable: true }]
+              : [],
+        },
+      };
+    }
+    return { poc: { files: [] }, exp: { files: [] } };
+  }
+
+  async getArtifactFilePreview(
+    taskId: string,
+    relPath: string,
+  ): Promise<VhArtifactFilePreview | null> {
+    const t = this.tasks.get(taskId);
+    if (!t) throw new Error(`Mock VH: unknown task ${taskId}`);
+    // report.yaml (byte-faithful source for disclose)
+    const yamlM = /^findings\/([^/]+)\/report\.yaml$/.exec(relPath);
+    if (yamlM) {
+      const key = yamlM[1];
+      const meta = t.findings.find((f) => f.key === key);
+      if (!meta) return null;
+      const body = [
+        "metadata:",
+        `  title: ${JSON.stringify(meta.title)}`,
+        `  cwe: ${meta.cwe ?? "CWE-000"}`,
+        `  severity: ${meta.severity}`,
+        "description:",
+        `  summary: Mock report.yaml for ${meta.key}`,
+        "",
+      ].join("\n");
+      return {
+        kind: "text",
+        size: body.length,
+        language: "yaml",
+        content: body,
+        truncated: false,
+        mime: "text/yaml",
+      };
+    }
+    // path form: findings/<key>/poc/poc.md
+    const m = /^findings\/([^/]+)\/(poc|exp)\/(.+)$/.exec(relPath);
+    if (!m) return null;
+    const [, key, kind, file] = m;
+    const meta = t.findings.find((f) => f.key === key);
+    if (!meta || meta.poc_status !== "confirmed") return null;
+    if (kind === "exp" && key !== "mock-rce") return null;
+    const body =
+      kind === "poc"
+        ? `# PoC for ${meta.title}\n\nSteps:\n1. trigger ${meta.primary_file}\n2. observe RCE/injection\n`
+        : `#!/usr/bin/env python3\n# exp for ${meta.title}\nprint("pwn")\n`;
+    return {
+      kind: "text",
+      size: body.length,
+      language: file.endsWith(".py") ? "python" : "markdown",
+      content: body,
+      truncated: false,
+      mime: file.endsWith(".py") ? "text/x-python" : "text/markdown",
     };
   }
 
@@ -92,7 +244,6 @@ export class MockVulnHunterClient implements VulnHunterClient {
     return true;
   }
 
-  /** Test helper: force a task into a state (disables auto-advance). */
   forceState(taskId: string, state: VhTaskState): void {
     const t = this.tasks.get(taskId);
     if (t) {

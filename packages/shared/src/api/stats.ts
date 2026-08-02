@@ -2,10 +2,10 @@ import type { SeverityCounts } from "./projects.js";
 
 export interface TrendDay {
   date: string; // YYYY-MM-DD
+  critical: number;
   high: number;
   medium: number;
   low: number;
-  info: number;
 }
 
 export interface CweTopItem {
@@ -19,6 +19,7 @@ export interface LiveScanItem {
   full_name: string;
   state: "scanning" | "dispatching";
   elapsed_sec: number;
+  findings_so_far: number;
 }
 
 export interface RecentActivityItem {
@@ -34,12 +35,11 @@ export interface OverviewStats {
   scan_completed_count: number;
   scan_failed_count: number;
   scan_in_progress_count: number;
+  /** Public findings found (NVD four tiers; excludes info). */
   finding_total: number;
   finding_disclosed_count: number;
   severity_counts: SeverityCounts;
-  /** Optional extended pulse fields (v1.2 dashboard). */
-  poc_rate?: number;
-  cwe_count?: number;
+  /** Optional extended fields (pulse / live). */
   trend?: TrendDay[];
   cwe_top?: CweTopItem[];
   live?: {

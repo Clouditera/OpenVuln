@@ -5,17 +5,18 @@ import type {
   SeverityCounts,
   SubmitProjectResponse,
 } from "@openvuln/shared";
+import { emptySeverityCounts } from "@openvuln/shared";
 import type { ServiceConfig } from "../../infra/config.js";
 import { AppError } from "../../middleware/error-handler.js";
+import { findingsStorage } from "../findings/index.js";
+import { parseReportYaml } from "../report/yaml-render.js";
+import { type ScanJobRow, scanStorage } from "../scans/index.js";
+import { fetchDefaultBranchHeadSha, parseGitHubUrl, resolveRootRepo } from "./github-sync.js";
 import * as storage from "./storage.js";
-import { parseGitHubUrl, resolveRootRepo, fetchDefaultBranchHeadSha } from "./github-sync.js";
-import * as scanStorage from "../scans/storage.js";
-import * as findingsStorage from "../findings/storage.js";
-import type { ScanJobRow } from "../scans/storage.js";
 import type { ProjectRow } from "./storage.js";
 
 function emptyCounts(): SeverityCounts {
-  return { high: 0, medium: 0, low: 0, info: 0 };
+  return emptySeverityCounts();
 }
 
 function toScanSummary(scan: ScanJobRow | null) {
@@ -26,6 +27,7 @@ function toScanSummary(scan: ScanJobRow | null) {
     commit_sha: scan.commit_sha,
     created_at: scan.created_at.toISOString(),
     finished_at: scan.finished_at?.toISOString() ?? null,
+    findings_so_far: scan.findings_so_far ?? 0,
   };
 }
 
@@ -95,18 +97,40 @@ export async function getPublicView(owner: string, repo: string): Promise<Projec
           created_at: latest.created_at.toISOString(),
           started_at: latest.started_at?.toISOString() ?? null,
           finished_at: latest.finished_at?.toISOString() ?? null,
+          findings_so_far: latest.findings_so_far ?? 0,
         }
       : null,
     severity_counts,
     cwe_distribution,
-    disclosed_findings: disclosed.map((f) => ({
-      id: f.id,
-      finding_key: f.finding_key,
-      severity: f.severity,
-      title: f.title,
-      cwe: f.cwe,
-      disclosed_at: f.disclosed_at?.toISOString() ?? null,
-    })),
+    disclosed_findings: disclosed.map((f) => {
+      let report: {
+        metadata: Record<string, unknown>;
+        description: Record<string, unknown>;
+        code: Record<string, unknown>;
+        references: unknown;
+      } | null = null;
+      if (f.report_yaml) {
+        const p = parseReportYaml(f.report_yaml);
+        if (p) {
+          report = {
+            metadata: p.metadata,
+            description: p.description,
+            code: p.code,
+            references: p.references,
+          };
+        }
+      }
+      return {
+        id: f.id,
+        finding_key: f.finding_key,
+        severity: f.severity,
+        title: f.title,
+        cwe: f.cwe,
+        disclosed_at: f.disclosed_at?.toISOString() ?? null,
+        summary: f.summary ?? null,
+        report,
+      };
+    }),
     created_at: project.created_at.toISOString(),
   };
 }

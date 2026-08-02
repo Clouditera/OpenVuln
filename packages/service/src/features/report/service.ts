@@ -1,8 +1,14 @@
+import {
+  type Severity,
+  type SeverityCounts,
+  emptySeverityCounts,
+  isPublicSeverity,
+} from "@openvuln/shared";
 import JSZip from "jszip";
-import type { Severity, SeverityCounts } from "@openvuln/shared";
 import { getDb } from "../../infra/db/index.js";
 import { AppError } from "../../middleware/error-handler.js";
-import { isUuid } from "../findings/storage.js";
+import { findingsStorage } from "../findings/index.js";
+import { parseReportYaml, renderReportYamlToMarkdown } from "./yaml-render.js";
 
 export type ReportFormat = "markdown" | "json" | "zip";
 
@@ -41,7 +47,7 @@ export interface SingleFindingReport {
 }
 
 function emptyCounts(): SeverityCounts {
-  return { high: 0, medium: 0, low: 0, info: 0 };
+  return emptySeverityCounts();
 }
 
 function slugify(s: string): string {
@@ -49,7 +55,7 @@ function slugify(s: string): string {
 }
 
 async function loadProjectMeta(projectId: string): Promise<PublicReport["project"]> {
-  if (!isUuid(projectId)) {
+  if (!findingsStorage.isUuid(projectId)) {
     throw new AppError("ERR_VALIDATION", { field: "id", reason: "invalid_uuid" });
   }
   const db = getDb();
@@ -74,9 +80,7 @@ async function loadProjectMeta(projectId: string): Promise<PublicReport["project
 
 async function loadLatestScan(projectId: string): Promise<PublicReport["latest_scan"]> {
   const db = getDb();
-  const scans = await db<
-    { finished_at: Date | null; commit_sha: string | null; state: string }[]
-  >`
+  const scans = await db<{ finished_at: Date | null; commit_sha: string | null; state: string }[]>`
     SELECT finished_at, commit_sha, state
     FROM scan_jobs
     WHERE project_id = ${projectId}::uuid
@@ -98,28 +102,35 @@ async function loadDisclosedFindings(projectId: string): Promise<DisclosedFindin
   const findings = await db<
     {
       finding_key: string;
-      severity: Severity;
+      severity: string;
       title: string;
       cwe: string | null;
       disclosed_at: Date | null;
     }[]
   >`
-    SELECT finding_key, severity, title, cwe, disclosed_at
-    FROM findings
-    WHERE project_id = ${projectId}::uuid
-      AND disclosure_state = 'disclosed'
+    SELECT f.finding_key, f.severity, f.disclosed_title AS title, f.cwe, f.disclosed_at
+    FROM findings f
+    JOIN projects p ON p.id = f.project_id AND p.current_scan_job_id = f.scan_job_id
+    WHERE f.project_id = ${projectId}::uuid
+      AND f.disclosure_state = 'disclosed'
+      AND f.severity IN ('critical', 'high', 'medium', 'low')
     ORDER BY
-      CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END,
-      disclosed_at DESC NULLS LAST,
-      title ASC
+      CASE f.severity
+        WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3
+        ELSE 4
+      END,
+      f.disclosed_at DESC NULLS LAST,
+      f.disclosed_title ASC NULLS LAST
   `;
-  return findings.map((f) => ({
-    finding_key: f.finding_key,
-    severity: f.severity,
-    title: f.title,
-    cwe: f.cwe,
-    disclosed_at: f.disclosed_at?.toISOString() ?? null,
-  }));
+  return findings
+    .filter((f) => isPublicSeverity(f.severity))
+    .map((f) => ({
+      finding_key: f.finding_key,
+      severity: f.severity as Severity,
+      title: f.title ?? f.finding_key,
+      cwe: f.cwe,
+      disclosed_at: f.disclosed_at?.toISOString() ?? null,
+    }));
 }
 
 export async function buildPublicReport(projectId: string): Promise<PublicReport> {
@@ -155,20 +166,22 @@ export async function buildSingleFindingReport(
   const rows = await db<
     {
       finding_key: string;
-      severity: Severity;
+      severity: string;
       title: string;
       cwe: string | null;
       disclosed_at: Date | null;
     }[]
   >`
-    SELECT finding_key, severity, title, cwe, disclosed_at
-    FROM findings
-    WHERE project_id = ${projectId}::uuid
-      AND finding_key = ${findingKey}
-      AND disclosure_state = 'disclosed'
+    SELECT f.finding_key, f.severity, f.disclosed_title AS title, f.cwe, f.disclosed_at
+    FROM findings f
+    JOIN projects p ON p.id = f.project_id AND p.current_scan_job_id = f.scan_job_id
+    WHERE f.project_id = ${projectId}::uuid
+      AND f.finding_key = ${findingKey}
+      AND f.disclosure_state = 'disclosed'
+      AND f.severity IN ('critical', 'high', 'medium', 'low')
   `;
-  if (rows.length === 0) {
-    // Distinguish not disclosed vs missing — both 404 to avoid leaking existence of owner_only
+  if (rows.length === 0 || !isPublicSeverity(rows[0].severity)) {
+    // owner_only / info / missing → 404 (no existence leak)
     throw new AppError("ERR_NOT_FOUND", { resource: "finding" });
   }
   const f = rows[0];
@@ -178,8 +191,8 @@ export async function buildSingleFindingReport(
     latest_scan,
     finding: {
       finding_key: f.finding_key,
-      severity: f.severity,
-      title: f.title,
+      severity: f.severity as Severity,
+      title: f.title ?? f.finding_key,
       cwe: f.cwe,
       disclosed_at: f.disclosed_at?.toISOString() ?? null,
     },
@@ -209,7 +222,7 @@ export function renderMarkdown(report: PublicReport): string {
   lines.push(``);
   lines.push(`| Severity | Count |`);
   lines.push(`|---|---:|`);
-  for (const sev of ["high", "medium", "low", "info"] as const) {
+  for (const sev of ["critical", "high", "medium", "low"] as const) {
     lines.push(`| ${sev} | ${severity_summary[sev]} |`);
   }
   lines.push(``);
@@ -273,7 +286,6 @@ export function renderSingleMarkdown(report: SingleFindingReport): string {
 
 export async function buildZipBundle(report: PublicReport): Promise<Uint8Array> {
   const zip = new JSZip();
-  const folderName = slugify(report.project.full_name);
 
   zip.file("index.md", renderMarkdown(report));
   zip.file(
@@ -292,6 +304,15 @@ export async function buildZipBundle(report: PublicReport): Promise<Uint8Array> 
     ),
   );
 
+  // Fidelity pack: original report.yaml + poc/exp from disclosed_files
+  const files = await findingsStorage.listDisclosedFilesForProject(report.project.id);
+  const byKey = new Map<string, typeof files>();
+  for (const f of files) {
+    const list = byKey.get(f.finding_key) ?? [];
+    list.push(f);
+    byKey.set(f.finding_key, list);
+  }
+
   const findingsDir = zip.folder("findings");
   if (findingsDir) {
     for (const f of report.findings) {
@@ -301,33 +322,65 @@ export async function buildZipBundle(report: PublicReport): Promise<Uint8Array> 
         latest_scan: report.latest_scan,
         finding: f,
       };
-      const base = `${slugify(f.severity)}-${slugify(f.finding_key)}`;
-      findingsDir.file(`${base}.md`, renderSingleMarkdown(single));
-      findingsDir.file(`${base}.json`, JSON.stringify(single, null, 2));
+      const dir = findingsDir.folder(slugify(f.finding_key));
+      if (!dir) continue;
+      dir.file("summary.md", renderSingleMarkdown(single));
+      dir.file("summary.json", JSON.stringify(single, null, 2));
+      const pack = byKey.get(f.finding_key) ?? [];
+      for (const file of pack) {
+        // report.yaml at finding root; poc/exp under subdirs
+        dir.file(file.rel_path, file.content);
+      }
     }
   }
 
-  // README for consumers
   zip.file(
     "README.md",
     [
       `# ${report.project.full_name} — disclosed findings bundle`,
       ``,
-      `- \`index.md\` / \`index.json\` — full summary`,
-      `- \`findings/\` — one Markdown + JSON file per disclosed finding`,
+      `- \`index.md\` / \`index.json\` — public summary`,
+      `- \`findings/<key>/report.yaml\` — **original VH report** (byte-faithful when disclosed with fidelity)`,
+      `- \`findings/<key>/poc/\` · \`exp/\` — disclosed product files`,
+      `- \`findings/<key>/summary.md\` — short public summary`,
       ``,
-      `Generated ${report.generated_at} by OpenVuln. Public fields only.`,
+      `Generated ${report.generated_at} by OpenVuln.`,
       ``,
     ].join("\n"),
   );
 
-  void folderName;
   const buf = await zip.generateAsync({
     type: "uint8array",
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   });
   return buf;
+}
+
+/** Single disclosed finding zip: report.yaml + poc/exp. */
+export async function buildSingleFindingZip(
+  projectId: string,
+  findingKey: string,
+): Promise<{ bytes: Uint8Array; filename: string }> {
+  const report = await buildSingleFindingReport(projectId, findingKey);
+  const files = await findingsStorage.listDisclosedFilesForFinding(projectId, findingKey);
+  const zip = new JSZip();
+  zip.file("summary.md", renderSingleMarkdown(report));
+  zip.file("summary.json", JSON.stringify(report, null, 2));
+  for (const f of files) {
+    zip.file(f.rel_path, f.content);
+  }
+  if (!files.some((f) => f.rel_path === "report.yaml" || f.kind === "report")) {
+    const yaml = await findingsStorage.getDisclosedReportYaml(projectId, findingKey);
+    if (yaml) zip.file("report.yaml", yaml);
+  }
+  const bytes = await zip.generateAsync({
+    type: "uint8array",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
+  });
+  const filename = `openvuln-${slugify(report.project.full_name)}-${slugify(findingKey)}.zip`;
+  return { bytes, filename };
 }
 
 export function filenameFor(report: PublicReport, format: ReportFormat): string {
@@ -338,7 +391,47 @@ export function filenameFor(report: PublicReport, format: ReportFormat): string 
   return `openvuln-${slug}-disclosed-${day}.md`;
 }
 
-export function singleFilenameFor(report: SingleFindingReport, format: "markdown" | "json"): string {
+export function renderFullReportMarkdown(
+  yaml: string,
+  opts: { findingKey?: string; projectFullName?: string },
+): string {
+  return renderReportYamlToMarkdown(yaml, opts);
+}
+
+/** Structured detail for Details tab HTML rendering (disclosed only). */
+export function buildDisclosedFindingDetail(
+  report: SingleFindingReport,
+  yaml: string | null,
+): {
+  finding: DisclosedFindingPublic;
+  project: PublicReport["project"];
+  latest_scan: PublicReport["latest_scan"];
+  generated_at: string;
+  report_yaml: string | null;
+  parsed: ReturnType<typeof parseReportYaml>;
+  download: { markdown: string; yaml: string; zip: string };
+} {
+  const key = report.finding.finding_key;
+  const base = `/api/projects/${report.project.id}/report/${encodeURIComponent(key)}`;
+  return {
+    finding: report.finding,
+    project: report.project,
+    latest_scan: report.latest_scan,
+    generated_at: report.generated_at,
+    report_yaml: yaml,
+    parsed: yaml ? parseReportYaml(yaml) : null,
+    download: {
+      markdown: base,
+      yaml: `${base}?format=yaml`,
+      zip: `${base}?format=zip`,
+    },
+  };
+}
+
+export function singleFilenameFor(
+  report: SingleFindingReport,
+  format: "markdown" | "json",
+): string {
   const slug = slugify(report.project.full_name);
   const key = slugify(report.finding.finding_key);
   const ext = format === "json" ? "json" : "md";

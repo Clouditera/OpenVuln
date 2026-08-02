@@ -19,7 +19,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # Uncomment once Dockerfile is ready (step 5)
+  # Optional full stack (mock VH). Prefer scripts/run-real-vh.sh for real mode.
   # service:
   #   build:
   #     context: ..
@@ -30,7 +30,9 @@ services:
   #     DATABASE_URL: postgresql://openvuln:openvuln@postgres:5432/openvuln
   #     VULNHUNTER_MOCK: "true"
   #     PORT: "7860"
-  #     SESSION_SECRET: dev-secret
+  #     ADMIN_TOKEN: dev-admin-token
+  #     # ADMIN_PUBLIC_KEY: ...
+  #     CORS_ALLOWED_ORIGINS: "*"
   #   depends_on:
   #     postgres:
   #       condition: service_healthy

@@ -1,4 +1,3 @@
-import { Hono } from "hono";
 import type {
   CweTopItem,
   LiveScanItem,
@@ -6,9 +5,11 @@ import type {
   RecentActivityItem,
   TrendDay,
 } from "@openvuln/shared";
+import { emptySeverityCounts } from "@openvuln/shared";
+import { Hono } from "hono";
 import { getDb } from "../../infra/db/index.js";
-import * as projectStorage from "../projects/storage.js";
-import * as findingsStorage from "../findings/storage.js";
+import { findingsStorage } from "../findings/index.js";
+import { projectStorage } from "../projects/index.js";
 
 export const statsRouter = new Hono();
 
@@ -22,69 +23,26 @@ const CWE_NAMES: Record<string, string> = {
   "CWE-287": "Auth Bypass",
   "CWE-502": "Deserialization",
   "CWE-611": "XXE",
-  "CWE-434": "Unrestricted Upload",
   "CWE-94": "Code Injection",
   "CWE-200": "Info Exposure",
-  "CWE-209": "Error Leak",
   "CWE-601": "Open Redirect",
-  "CWE-330": "Weak RNG",
-  "CWE-346": "Origin Validation",
-  "CWE-1321": "Prototype Pollution",
-  "CWE-367": "TOCTOU",
-  "CWE-377": "Insecure Temp File",
-  "CWE-444": "HTTP Request Smuggling",
-  "CWE-477": "Obsolete Function",
-  "CWE-489": "Active Debug Code",
-  "CWE-697": "Incorrect Comparison",
+  "CWE-798": "Hard-coded Credentials",
+  "CWE-862": "Missing Authorization",
 };
 
-/** Deterministic PRNG for synthetic trend when history is thin. */
-function mulberry32(seed: number) {
-  return () => {
-    let t = (seed += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+function emptyTrendDay(date: string): TrendDay {
+  return { date, critical: 0, high: 0, medium: 0, low: 0 };
 }
 
-function buildTrend(
-  realByDate: Map<string, TrendDay>,
-  severity: { high: number; medium: number; low: number; info: number },
-): TrendDay[] {
+function buildTrend(realByDate: Map<string, TrendDay>): TrendDay[] {
   const days: TrendDay[] = [];
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-
-  const total = severity.high + severity.medium + severity.low + severity.info;
-  const seed = total * 97 + severity.high * 13 + 42;
-  const rand = mulberry32(seed || 1);
-
-  // weights for daily shape
-  const wh = total ? severity.high / total : 0.25;
-  const wm = total ? severity.medium / total : 0.3;
-  const wl = total ? severity.low / total : 0.3;
-  const dailyBase = Math.max(2, Math.round((total || 40) / 18));
-
   for (let i = 29; i >= 0; i--) {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - i);
     const key = d.toISOString().slice(0, 10);
-    const real = realByDate.get(key);
-    if (real && real.high + real.medium + real.low + real.info > 0) {
-      days.push(real);
-      continue;
-    }
-    // synthetic wave so chart looks alive in prototype
-    const wave = 0.55 + 0.45 * Math.sin((i / 30) * Math.PI * 2.4 + 0.6);
-    const noise = 0.7 + rand() * 0.6;
-    const n = Math.max(0, Math.round(dailyBase * wave * noise));
-    const high = Math.round(n * wh);
-    const medium = Math.round(n * wm);
-    const low = Math.round(n * wl);
-    let info = Math.max(0, n - high - medium - low);
-    if (n === 0) info = 0;
-    days.push({ date: key, high, medium, low, info });
+    days.push(realByDate.get(key) ?? emptyTrendDay(key));
   }
   return days;
 }
@@ -104,11 +62,13 @@ statsRouter.get("/overview", async (c) => {
   const findingTotals = await findingsStorage.platformFindingTotals();
   const severity_counts = await findingsStorage.platformSeverityCounts();
 
-  // CWE top 8
   const cweRows = await db<{ cwe: string; n: string }[]>`
     SELECT COALESCE(f.cwe, 'unknown') AS cwe, count(*)::text AS n
     FROM findings f
-    JOIN projects p ON p.id = f.project_id AND p.removed_at IS NULL
+    JOIN projects p ON p.id = f.project_id
+      AND p.removed_at IS NULL
+      AND p.current_scan_job_id = f.scan_job_id
+    WHERE f.severity IN ('critical', 'high', 'medium', 'low')
     GROUP BY COALESCE(f.cwe, 'unknown')
     ORDER BY count(*) DESC
     LIMIT 8
@@ -118,17 +78,19 @@ statsRouter.get("/overview", async (c) => {
     name: CWE_NAMES[r.cwe] ?? null,
     count: Number(r.n),
   }));
-  const cweCountRows = await db<{ n: string }[]>`
-    SELECT count(DISTINCT COALESCE(f.cwe, 'unknown'))::text AS n
-    FROM findings f
-    JOIN projects p ON p.id = f.project_id AND p.removed_at IS NULL
-  `;
 
-  // Live scans
   const liveRows = await db<
-    { project_id: string; full_name: string; state: string; started_at: Date | null; created_at: Date }[]
+    {
+      project_id: string;
+      full_name: string;
+      state: string;
+      started_at: Date | null;
+      created_at: Date;
+      findings_so_far: number;
+    }[]
   >`
-    SELECT j.project_id::text, p.full_name, j.state, j.started_at, j.created_at
+    SELECT j.project_id::text, p.full_name, j.state, j.started_at, j.created_at,
+           COALESCE(j.findings_so_far, 0) AS findings_so_far
     FROM scan_jobs j
     JOIN projects p ON p.id = j.project_id AND p.removed_at IS NULL
     WHERE j.state IN ('scanning', 'dispatching')
@@ -149,16 +111,16 @@ statsRouter.get("/overview", async (c) => {
       full_name: r.full_name,
       state: r.state === "dispatching" ? "dispatching" : "scanning",
       elapsed_sec: Math.max(0, Math.floor((now - start) / 1000)),
+      findings_so_far: Number(r.findings_so_far) || 0,
     };
   });
 
-  // Recent activity (separate queries — cleaner than UNION + ORDER BY branches)
   const recent: RecentActivityItem[] = [];
-  const completedRecent = await db<
-    { ts: Date; full_name: string; extra: string }[]
-  >`
+  const completedRecent = await db<{ ts: Date; full_name: string; extra: string }[]>`
     SELECT j.finished_at AS ts, p.full_name,
-           (SELECT count(*)::text FROM findings f WHERE f.scan_job_id = j.id) AS extra
+           (SELECT count(*)::text FROM findings f
+            WHERE f.scan_job_id = j.id
+              AND f.severity IN ('critical','high','medium','low')) AS extra
     FROM scan_jobs j
     JOIN projects p ON p.id = j.project_id AND p.removed_at IS NULL
     WHERE j.state = 'completed' AND j.finished_at IS NOT NULL
@@ -191,8 +153,12 @@ statsRouter.get("/overview", async (c) => {
   const disclosedRecent = await db<{ ts: Date; full_name: string; extra: string }[]>`
     SELECT f.disclosed_at AS ts, p.full_name, f.severity AS extra
     FROM findings f
-    JOIN projects p ON p.id = f.project_id AND p.removed_at IS NULL
-    WHERE f.disclosure_state = 'disclosed' AND f.disclosed_at IS NOT NULL
+    JOIN projects p ON p.id = f.project_id
+      AND p.removed_at IS NULL
+      AND p.current_scan_job_id = f.scan_job_id
+    WHERE f.disclosure_state = 'disclosed'
+      AND f.disclosed_at IS NOT NULL
+      AND f.severity IN ('critical','high','medium','low')
     ORDER BY f.disclosed_at DESC
     LIMIT 4
   `;
@@ -208,46 +174,33 @@ statsRouter.get("/overview", async (c) => {
   recent.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
   recent.splice(12);
 
-  // Real trend from findings.created — findings table has no created_at; use scan finished_at join
-  // Approximate: attribute each finding to its scan_job finished day
-  const trendRaw = await db<
-    { day: string; severity: string; n: string }[]
-  >`
+  const trendRaw = await db<{ day: string; severity: string; n: string }[]>`
     SELECT
       to_char(date_trunc('day', COALESCE(j.finished_at, j.created_at) AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
       f.severity,
       count(*)::text AS n
     FROM findings f
     JOIN scan_jobs j ON j.id = f.scan_job_id
-    JOIN projects p ON p.id = f.project_id AND p.removed_at IS NULL
+    JOIN projects p ON p.id = f.project_id
+      AND p.removed_at IS NULL
+      AND p.current_scan_job_id = f.scan_job_id
     WHERE COALESCE(j.finished_at, j.created_at) > now() - interval '30 days'
+      AND f.severity IN ('critical','high','medium','low')
     GROUP BY 1, 2
   `;
   const realByDate = new Map<string, TrendDay>();
   for (const row of trendRaw) {
-    const cur = realByDate.get(row.day) ?? {
-      date: row.day,
-      high: 0,
-      medium: 0,
-      low: 0,
-      info: 0,
-    };
-    const sev = row.severity as keyof Omit<TrendDay, "date">;
-    if (sev in cur && sev !== ("date" as never)) {
-      (cur as TrendDay)[sev] = Number(row.n);
+    const cur = realByDate.get(row.day) ?? emptyTrendDay(row.day);
+    if (
+      row.severity === "critical" ||
+      row.severity === "high" ||
+      row.severity === "medium" ||
+      row.severity === "low"
+    ) {
+      cur[row.severity] = Number(row.n);
     }
     realByDate.set(row.day, cur);
   }
-  const trend = buildTrend(realByDate, severity_counts);
-
-  // Prototype PoC rate: disclosed ratio blended with a floor so the pulse looks healthy
-  const poc_rate =
-    findingTotals.total === 0
-      ? 0
-      : Math.min(
-          0.95,
-          Math.max(0.62, findingTotals.disclosed / findingTotals.total + 0.55),
-        );
 
   const body: OverviewStats = {
     project_count: projectCount,
@@ -256,10 +209,8 @@ statsRouter.get("/overview", async (c) => {
     scan_in_progress_count: Number(scanRows[0]?.in_progress ?? 0),
     finding_total: findingTotals.total,
     finding_disclosed_count: findingTotals.disclosed,
-    severity_counts,
-    poc_rate,
-    cwe_count: Number(cweCountRows[0]?.n ?? 0),
-    trend,
+    severity_counts: severity_counts ?? emptySeverityCounts(),
+    trend: buildTrend(realByDate),
     cwe_top,
     live: {
       scanning,

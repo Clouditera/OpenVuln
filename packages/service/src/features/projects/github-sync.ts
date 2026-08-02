@@ -3,7 +3,7 @@ export {
   fetchDefaultBranchHeadSha,
   fetchRepoMeta,
   type GitHubRepoMeta,
-} from "../auth/github.js";
+} from "./github.js";
 
 /** Normalize various GitHub URL forms to {owner, repo}. */
 export function parseGitHubUrl(input: string): { owner: string; repo: string } | null {
@@ -11,7 +11,7 @@ export function parseGitHubUrl(input: string): { owner: string; repo: string } |
   if (!raw) return null;
 
   // Strip trailing slashes and .git
-  let s = raw.replace(/\/+$/, "").replace(/\.git$/i, "");
+  const s = raw.replace(/\/+$/, "").replace(/\.git$/i, "");
 
   // ssh form git@github.com:owner/repo
   const ssh = s.match(/^git@github\.com:([^/]+)\/([^/]+)$/i);

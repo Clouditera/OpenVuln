@@ -1,5 +1,11 @@
 import { logger } from "../../infra/logger.js";
-import type { VulnHunterClient, VhFindingMeta, VhTaskState } from "./client.js";
+import type {
+  CreateScanTaskFromArchiveInput,
+  CreateScanTaskInput,
+  VulnHunterClient,
+  VhFindingMeta,
+  VhTaskState,
+} from "./client.js";
 
 interface CookieClientOptions {
   baseUrl: string;
@@ -53,10 +59,13 @@ export class CookieVulnHunterClient implements VulnHunterClient {
     await this.ensureLogin();
     const headers = new Headers(init.headers);
     headers.set("cookie", this.cookie ?? "");
-    if (init.body && !headers.has("content-type")) {
+    const isForm =
+      typeof FormData !== "undefined" && init.body instanceof FormData;
+    if (init.body && !headers.has("content-type") && !isForm) {
       headers.set("content-type", "application/json");
     }
-    const res = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+    const signal = init.signal ?? AbortSignal.timeout(15_000);
+    const res = await fetch(`${this.baseUrl}${path}`, { ...init, headers, signal });
     if (res.status === 401 && !retried) {
       logger.warn("VH 401 — re-login once");
       this.cookie = null;
@@ -66,21 +75,76 @@ export class CookieVulnHunterClient implements VulnHunterClient {
     return res;
   }
 
-  async createScanTask(input: { gitUrl: string; displayName: string }): Promise<{ taskId: string }> {
+  async createScanTask(input: CreateScanTaskInput): Promise<{ taskId: string }> {
+    const body: Record<string, unknown> = {
+      git_url: input.gitUrl,
+      project_name: input.displayName.split(" ")[0] || input.displayName,
+      display_name: input.displayName,
+    };
+    if (input.credentialId) body.credential_id = input.credentialId;
+    if (input.scanTimeoutSeconds != null) {
+      body.scan_timeout = input.scanTimeoutSeconds;
+      body.timeout_mode = input.timeoutMode ?? "custom";
+    } else if (input.timeoutMode) {
+      body.timeout_mode = input.timeoutMode;
+    }
+    if (input.maxItemsPerRecon != null) body.max_items_per_recon = input.maxItemsPerRecon;
+    if (input.agentMaxParallel != null) body.agent_max_parallel = input.agentMaxParallel;
+    if (input.auditFocus) body.audit_focus = input.auditFocus;
+    if (input.enableDynamicVerify != null) body.enable_dynamic_verify = input.enableDynamicVerify;
+    if (input.enableDynamicExploit != null) body.enable_dynamic_exploit = input.enableDynamicExploit;
+
     const res = await this.request("/api/tasks", {
       method: "POST",
-      body: JSON.stringify({
-        git_url: input.gitUrl,
-        project_name: input.displayName,
-      }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`VH createScanTask failed: ${res.status} ${body}`);
+      const text = await res.text().catch(() => "");
+      throw new Error(`VH createScanTask failed: ${res.status} ${text}`);
     }
     const data = (await res.json()) as { task?: { id?: string }; id?: string };
     const taskId = data.task?.id ?? data.id;
     if (!taskId) throw new Error("VH createScanTask: missing task id in response");
+    return { taskId };
+  }
+
+  async createScanTaskFromArchive(
+    input: CreateScanTaskFromArchiveInput,
+  ): Promise<{ taskId: string }> {
+    const form = new FormData();
+    const blob = new Blob([new Uint8Array(input.archive)], { type: "application/zip" });
+    form.append("file", blob, input.filename);
+    form.append("display_name", input.displayName);
+    if (input.credentialId) form.append("credential_id", input.credentialId);
+    if (input.scanTimeoutSeconds != null) {
+      form.append("scan_timeout", String(input.scanTimeoutSeconds));
+      form.append("timeout_mode", input.timeoutMode ?? "custom");
+    }
+    if (input.maxItemsPerRecon != null) {
+      form.append("max_items_per_recon", String(input.maxItemsPerRecon));
+    }
+    if (input.agentMaxParallel != null) {
+      form.append("agent_max_parallel", String(input.agentMaxParallel));
+    }
+    if (input.auditFocus) form.append("audit_focus", input.auditFocus);
+    if (input.enableDynamicVerify != null) {
+      form.append("enable_dynamic_verify", input.enableDynamicVerify ? "true" : "false");
+    }
+    if (input.enableDynamicExploit != null) {
+      form.append("enable_dynamic_exploit", input.enableDynamicExploit ? "true" : "false");
+    }
+    const res = await this.request("/api/tasks", {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`VH createScanTaskFromArchive failed: ${res.status} ${text}`);
+    }
+    const data = (await res.json()) as { task?: { id?: string }; id?: string };
+    const taskId = data.task?.id ?? data.id;
+    if (!taskId) throw new Error("VH createScanTaskFromArchive: missing task id");
     return { taskId };
   }
 
@@ -113,6 +177,38 @@ export class CookieVulnHunterClient implements VulnHunterClient {
       throw new Error(`VH getFindingDetail failed: ${res.status} ${body}`);
     }
     return res.json();
+  }
+
+  async listFindingArtifacts(
+    taskId: string,
+    findingId: string,
+  ): Promise<import("./client.js").VhFindingArtifactGroups> {
+    const res = await this.request(
+      `/api/tasks/${taskId}/findings/${encodeURIComponent(findingId)}/artifacts`,
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`VH listFindingArtifacts failed: ${res.status} ${body}`);
+    }
+    const data = (await res.json()) as import("./client.js").VhFindingArtifactGroups;
+    return {
+      poc: { files: Array.isArray(data?.poc?.files) ? data.poc.files : [] },
+      exp: { files: Array.isArray(data?.exp?.files) ? data.exp.files : [] },
+    };
+  }
+
+  async getArtifactFilePreview(
+    taskId: string,
+    relPath: string,
+  ): Promise<import("./client.js").VhArtifactFilePreview | null> {
+    const q = new URLSearchParams({ path: relPath });
+    const res = await this.request(`/api/tasks/${taskId}/artifacts/file?${q}`);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`VH getArtifactFilePreview failed: ${res.status} ${body}`);
+    }
+    return (await res.json()) as import("./client.js").VhArtifactFilePreview;
   }
 
   async healthCheck(): Promise<boolean> {

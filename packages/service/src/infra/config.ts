@@ -1,4 +1,5 @@
 /** Service configuration loaded from environment variables */
+import { decodePublicKeyEnv } from "@openvuln/shared/crypto";
 
 export function requireEnv(key: string): string {
   const val = process.env[key];
@@ -15,74 +16,103 @@ export type VulnHunterAuthMode = "cookie" | "token";
 export interface ServiceConfig {
   port: number;
   publicBaseUrl: string;
+  corsAllowedOrigins: string[];
   db: { url: string };
-  sessionSecret: string;
   vulnhunter: {
     baseUrl: string;
     authMode: VulnHunterAuthMode;
     username: string;
     password: string;
     apiToken: string;
+    credentialId: string;
     mock: boolean;
+    create: {
+      scanTimeoutHours: number;
+      maxItemsPerRecon: number;
+      agentMaxParallel: number;
+      auditFocus: string;
+      enableDynamicVerify: boolean;
+      enableDynamicExploit: boolean;
+    };
+    sourceMode: "archive" | "git";
+    zipMaxMb: number;
+    zipDownloadTimeoutMs: number;
   };
-  github: {
-    clientId: string;
-    clientSecret: string;
-    serverToken: string;
-  };
+  github: { serverToken: string };
   scan: {
     concurrency: number;
     cooldownDays: number;
     dispatcherIntervalMs: number;
     pollerIntervalMs: number;
+    vhFailGracePolls: number;
   };
-  adminGithubLogins: string[];
+  adminToken: string;
+  adminPublicKeyPem: string;
   log: { level: string };
 }
 
 export function loadConfig(): ServiceConfig {
-  const authMode = optionalEnv("VULNHUNTER_AUTH_MODE", "cookie");
-  if (authMode !== "cookie" && authMode !== "token") {
-    throw new Error(`Invalid VULNHUNTER_AUTH_MODE: ${authMode}`);
+  const authModeRaw = optionalEnv("VULNHUNTER_AUTH_MODE", "cookie");
+  if (authModeRaw !== "cookie" && authModeRaw !== "token") {
+    throw new Error(`Invalid VULNHUNTER_AUTH_MODE: ${authModeRaw}`);
   }
-
-  const adminRaw = optionalEnv("ADMIN_GITHUB_LOGINS", "");
-  const adminGithubLogins = adminRaw
+  const authMode = authModeRaw as VulnHunterAuthMode;
+  const mock = optionalEnv("VULNHUNTER_MOCK", "false") === "true";
+  const adminToken = optionalEnv("ADMIN_TOKEN", "");
+  const adminKeyRaw = optionalEnv("ADMIN_PUBLIC_KEY", "");
+  let adminPublicKeyPem = "";
+  if (adminKeyRaw) {
+    adminPublicKeyPem = decodePublicKeyEnv(adminKeyRaw);
+  } else if (!mock && process.env.NODE_ENV === "production") {
+    throw new Error("ADMIN_PUBLIC_KEY is required in production");
+  }
+  const corsRaw = optionalEnv("CORS_ALLOWED_ORIGINS", "");
+  const corsAllowedOrigins = corsRaw
     .split(",")
-    .map((s) => s.trim().toLowerCase())
+    .map((s) => s.trim())
     .filter(Boolean);
+  const sourceModeRaw = optionalEnv("VH_SOURCE_MODE", "archive").toLowerCase();
+  const sourceMode = sourceModeRaw === "git" ? "git" : "archive";
 
   return {
     port: Number(optionalEnv("PORT", "7860")),
     publicBaseUrl: optionalEnv("PUBLIC_BASE_URL", "http://localhost:7860"),
+    corsAllowedOrigins,
     db: {
-      url: optionalEnv(
-        "DATABASE_URL",
-        "postgresql://openvuln:openvuln@localhost:5432/openvuln",
-      ),
+      url: optionalEnv("DATABASE_URL", "postgresql://openvuln:openvuln@localhost:5432/openvuln"),
     },
-    sessionSecret: optionalEnv("SESSION_SECRET", "dev-session-secret-change-me"),
     vulnhunter: {
       baseUrl: optionalEnv("VULNHUNTER_BASE_URL", "http://localhost:28080"),
       authMode,
       username: optionalEnv("VULNHUNTER_USERNAME", ""),
       password: optionalEnv("VULNHUNTER_PASSWORD", ""),
       apiToken: optionalEnv("VULNHUNTER_API_TOKEN", ""),
-      mock: optionalEnv("VULNHUNTER_MOCK", "false") === "true",
+      credentialId: optionalEnv("VULNHUNTER_CREDENTIAL_ID", ""),
+      mock,
+      create: {
+        scanTimeoutHours: Number(optionalEnv("VH_SCAN_TIMEOUT_HOURS", "24")),
+        maxItemsPerRecon: Number(optionalEnv("VH_MAX_ITEMS_PER_RECON", "10")),
+        agentMaxParallel: Number(optionalEnv("VH_AGENT_MAX_PARALLEL", "5")),
+        auditFocus: optionalEnv("VH_AUDIT_FOCUS", "全面扫描，确保高覆盖率和高 poc/exp 执行率"),
+        enableDynamicVerify: optionalEnv("VH_ENABLE_DYNAMIC_VERIFY", "true") === "true",
+        enableDynamicExploit: optionalEnv("VH_ENABLE_DYNAMIC_EXPLOIT", "true") === "true",
+      },
+      sourceMode,
+      zipMaxMb: Number(optionalEnv("VH_ZIP_MAX_MB", "500")),
+      zipDownloadTimeoutMs: Number(optionalEnv("VH_ZIP_DOWNLOAD_TIMEOUT_MS", "120000")),
     },
     github: {
-      clientId: optionalEnv("GITHUB_CLIENT_ID", ""),
-      clientSecret: optionalEnv("GITHUB_CLIENT_SECRET", ""),
       serverToken: optionalEnv("GITHUB_SERVER_TOKEN", ""),
     },
     scan: {
-      concurrency: Number(optionalEnv("SCAN_CONCURRENCY", "1")),
-      // Stage default in .env is 36500 (one scan / project). Code fallback 7 for local experiments.
+      concurrency: Number(optionalEnv("SCAN_CONCURRENCY", "4")),
       cooldownDays: Number(optionalEnv("SCAN_COOLDOWN_DAYS", "7")),
       dispatcherIntervalMs: Number(optionalEnv("SCAN_DISPATCHER_INTERVAL_MS", "10000")),
       pollerIntervalMs: Number(optionalEnv("SCAN_POLLER_INTERVAL_MS", "30000")),
+      vhFailGracePolls: Number(optionalEnv("SCAN_VH_FAIL_GRACE_POLLS", "3")),
     },
-    adminGithubLogins,
+    adminToken,
+    adminPublicKeyPem,
     log: {
       level: optionalEnv("LOG_LEVEL", "info"),
     },

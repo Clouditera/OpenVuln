@@ -1,31 +1,210 @@
-import type { Severity } from "@openvuln/shared";
-import { logger } from "../../infra/logger.js";
+import { randomUUID } from "node:crypto";
+import { type SeverityStored, isIngestiblePocStatus, severityFromCvss } from "@openvuln/shared";
+import { encryptForAdmin } from "@openvuln/shared/crypto";
 import type { ServiceConfig } from "../../infra/config.js";
-import { getVulnHunterClient } from "../vulnhunter/index.js";
+import { loadConfig } from "../../infra/config.js";
 import { getDb } from "../../infra/db/index.js";
+import { logger } from "../../infra/logger.js";
+import { findingsStorage, harvestFindingArtifacts } from "../findings/index.js";
+import { githubApi, githubZipball, parseGitHubUrl } from "../projects/index.js";
+import { type VhFindingMeta, getVulnHunterClient } from "../vulnhunter/index.js";
 import * as storage from "./storage.js";
-import * as findingsStorage from "../findings/storage.js";
 
 let dispatcherTimer: ReturnType<typeof setInterval> | null = null;
 let pollerTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 
-function normalizeSeverity(raw: string | undefined): Severity {
-  const s = (raw ?? "info").toLowerCase();
-  if (s === "high" || s === "medium" || s === "low" || s === "info") return s;
-  if (s === "critical") return "high"; // VH has no critical; map up if ever seen
-  return "info";
+/** Tick re-entrancy guards. */
+let dispatchBusy = false;
+let pollBusy = false;
+
+/** Runtime concurrency override (admin PUT); null → env default. */
+let runtimeConcurrency: number | null = null;
+
+/** VH outage backoff state. */
+let vhOutageStrikes = 0;
+let pollNotBefore = 0;
+let dispatchNotBefore = 0;
+
+const DISPATCH_MAX_ATTEMPTS = 3;
+const BACKOFF_BASE_MS = 30_000;
+const BACKOFF_CAP_MS = 300_000;
+
+function pickNumber(...vals: unknown[]): number | null {
+  for (const v of vals) {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) {
+      return Number(v);
+    }
+  }
+  return null;
 }
 
-async function getProjectMeta(projectId: string): Promise<{ full_name: string; html_url: string } | null> {
+function pickString(...vals: unknown[]): string | null {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return null;
+}
+
+function isTransientVhError(err: unknown): boolean {
+  if (!(err instanceof Error)) return true;
+  const msg = err.message.toLowerCase();
+  if (msg.includes("abort") || msg.includes("timeout")) return true;
+  if (msg.includes("fetch failed") || msg.includes("econn") || msg.includes("enotfound")) {
+    return true;
+  }
+  // HTTP 5xx from client wrappers
+  if (/\b5\d\d\b/.test(msg)) return true;
+  if (msg.includes("network")) return true;
+  return false;
+}
+
+function nextBackoffMs(strikes: number): number {
+  const exp = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** Math.max(0, strikes - 1));
+  return exp;
+}
+
+function noteVhSuccess(): void {
+  if (vhOutageStrikes > 0) {
+    logger.info({ previousStrikes: vhOutageStrikes }, "VH reachable again — backoff cleared");
+  }
+  vhOutageStrikes = 0;
+  pollNotBefore = 0;
+  dispatchNotBefore = 0;
+}
+
+function noteVhOutage(scope: "poll" | "dispatch"): void {
+  vhOutageStrikes += 1;
+  const delay = nextBackoffMs(vhOutageStrikes);
+  const until = Date.now() + delay;
+  if (scope === "poll") pollNotBefore = until;
+  else dispatchNotBefore = until;
+  // keep both in sync so neither thrashes during full outage
+  pollNotBefore = Math.max(pollNotBefore, until);
+  dispatchNotBefore = Math.max(dispatchNotBefore, until);
+  logger.warn(
+    { strikes: vhOutageStrikes, backoffMs: delay, scope },
+    "VH unreachable — backing off",
+  );
+}
+
+/** Map VH meta/detail → NVD display severity + CVSS fields. */
+export function mapFindingSeverity(
+  meta: VhFindingMeta,
+  detail: unknown,
+): {
+  severity: SeverityStored;
+  cvssScore: number | null;
+  cvssVector: string | null;
+  vhSeverity: string | null;
+} {
+  const detailObj = (detail && typeof detail === "object" ? detail : {}) as Record<string, unknown>;
+  const metaRec = meta as Record<string, unknown>;
+  const cvssScore = pickNumber(
+    meta.cvss_score,
+    metaRec.cvssScore,
+    detailObj.cvss_score,
+    detailObj.cvssScore,
+    (detailObj.metadata as Record<string, unknown> | undefined)?.cvss_score,
+  );
+  const cvssVector = pickString(
+    meta.cvss_vector,
+    metaRec.cvssVector,
+    detailObj.cvss_vector,
+    detailObj.cvssVector,
+    (detailObj.metadata as Record<string, unknown> | undefined)?.cvss_vector,
+  );
+  const vhSeverity = pickString(
+    meta.severity,
+    detailObj.severity,
+    (detailObj.metadata as Record<string, unknown> | undefined)?.severity,
+  );
+
+  let severity: SeverityStored;
+  if (cvssScore != null) {
+    severity = severityFromCvss(cvssScore);
+  } else if (vhSeverity) {
+    const s = vhSeverity.toLowerCase();
+    if (s === "critical" || s === "高危" || s === "严重") severity = "critical";
+    else if (s === "high" || s === "高") severity = "high";
+    else if (s === "medium" || s === "中" || s === "中危") severity = "medium";
+    else if (s === "low" || s === "低" || s === "低危") severity = "low";
+    else severity = "info";
+  } else {
+    severity = "info";
+  }
+
+  return { severity, cvssScore, cvssVector, vhSeverity };
+}
+
+export function shouldIngestFinding(meta: VhFindingMeta, detail: unknown): boolean {
+  const detailObj = (detail && typeof detail === "object" ? detail : {}) as Record<string, unknown>;
+  const itemType = (
+    pickString(meta.item_type, detailObj.item_type, detailObj.itemType) ?? "finding"
+  ).toLowerCase();
+  if (itemType !== "finding") return false;
+
+  const poc = pickString(meta.poc_status, detailObj.poc_status, detailObj.pocStatus);
+  // missing poc_status → unknown → ingest
+  if (poc && !isIngestiblePocStatus(poc)) return false;
+  return true;
+}
+
+async function getProjectMeta(projectId: string): Promise<{
+  full_name: string;
+  html_url: string;
+  owner_login: string;
+  name: string;
+  default_branch: string;
+} | null> {
   const db = getDb();
-  const rows = await db<{ full_name: string; html_url: string }[]>`
-    SELECT full_name, html_url FROM projects WHERE id = ${projectId}::uuid
+  const rows = await db<
+    {
+      full_name: string;
+      html_url: string;
+      owner_login: string;
+      name: string;
+      default_branch: string;
+    }[]
+  >`
+    SELECT full_name, html_url, owner_login, name, default_branch
+    FROM projects WHERE id = ${projectId}::uuid
   `;
   return rows[0] ?? null;
 }
 
+export function getEffectiveConcurrency(envDefault: number): number {
+  return runtimeConcurrency ?? envDefault;
+}
+
+export function getScanConfigView(envDefault: number): {
+  concurrency: number;
+  source: "override" | "env";
+  vh_fail_grace_polls: number;
+} {
+  const cfg = loadConfig();
+  return {
+    concurrency: getEffectiveConcurrency(envDefault),
+    source: runtimeConcurrency != null ? "override" : "env",
+    vh_fail_grace_polls: cfg.scan.vhFailGracePolls,
+  };
+}
+
+/** Admin runtime override. Clamped 1..16. null clears override. */
+export function setRuntimeConcurrency(n: number | null): number {
+  if (n == null) {
+    runtimeConcurrency = null;
+    return loadConfig().scan.concurrency;
+  }
+  const v = Math.max(1, Math.min(16, Math.floor(n)));
+  runtimeConcurrency = v;
+  return v;
+}
+
 async function dispatchOnce(concurrency: number): Promise<void> {
+  if (Date.now() < dispatchNotBefore) return;
+
   const inFlight = await storage.countInFlight();
   const slots = concurrency - inFlight;
   if (slots <= 0) return;
@@ -34,6 +213,8 @@ async function dispatchOnce(concurrency: number): Promise<void> {
   if (jobs.length === 0) return;
 
   const vh = getVulnHunterClient();
+  let allFailedTransient = true;
+  let attempted = 0;
 
   for (const job of jobs) {
     const project = await getProjectMeta(job.project_id);
@@ -41,60 +222,212 @@ async function dispatchOnce(concurrency: number): Promise<void> {
       await storage.markFailed(job.id, "project_missing");
       continue;
     }
+    // Include attempt so admin retry / requeue never collides with VH display_name 409
     const shortId = job.id.slice(0, 8);
-    const displayName = `${project.full_name} #${shortId}`;
+    const attemptSuffix = job.attempt > 1 ? `a${job.attempt}` : "";
+    const displayName = `${project.full_name} #${shortId}${attemptSuffix}`;
+    attempted += 1;
     try {
       logger.info({ jobId: job.id, project: project.full_name }, "Dispatching scan job to VH");
-      const { taskId } = await vh.createScanTask({
-        gitUrl: project.html_url,
+      const cfg = loadConfig();
+      const c = cfg.vulnhunter.create;
+      const createOpts = {
         displayName,
-      });
+        scanTimeoutSeconds: Math.round(c.scanTimeoutHours * 3600),
+        timeoutMode: "custom" as const,
+        maxItemsPerRecon: c.maxItemsPerRecon,
+        agentMaxParallel: c.agentMaxParallel,
+        auditFocus: c.auditFocus,
+        enableDynamicVerify: c.enableDynamicVerify,
+        enableDynamicExploit: c.enableDynamicExploit,
+      };
+
+      let taskId: string;
+
+      // Mock never hits real GitHub/VH upload; archive mode is for real TOKEN/cookie clients.
+      if (cfg.vulnhunter.sourceMode === "archive" && !cfg.vulnhunter.mock) {
+        // Resolve HEAD SHA → pin zipball → multipart upload
+        const parsed =
+          parseGitHubUrl(project.html_url) ??
+          ({ owner: project.owner_login, repo: project.name } as const);
+        const branch = project.default_branch || "main";
+        const sha =
+          (await githubApi.fetchDefaultBranchHeadSha(
+            parsed.owner,
+            parsed.repo,
+            branch,
+            cfg.github.serverToken || undefined,
+          )) ?? branch;
+        await storage.setCommitSha(job.id, sha.length === 40 ? sha : null);
+
+        const maxBytes = Math.max(1, cfg.vulnhunter.zipMaxMb) * 1024 * 1024;
+        try {
+          const zip = await githubZipball.downloadGithubZipball({
+            owner: parsed.owner,
+            repo: parsed.repo,
+            ref: sha,
+            maxBytes,
+            token: cfg.github.serverToken || undefined,
+            timeoutMs: cfg.vulnhunter.zipDownloadTimeoutMs,
+          });
+          ({ taskId } = await vh.createScanTaskFromArchive({
+            ...createOpts,
+            archive: zip.buffer,
+            filename: zip.filename,
+          }));
+        } catch (zerr) {
+          if (zerr instanceof githubZipball.ZipballTooLargeError) {
+            await storage.markFailed(job.id, zerr.message.slice(0, 2000));
+            allFailedTransient = false;
+            continue;
+          }
+          throw zerr;
+        }
+      } else {
+        ({ taskId } = await vh.createScanTask({
+          ...createOpts,
+          gitUrl: project.html_url,
+        }));
+      }
+
       await storage.markScanning(job.id, taskId);
       logger.info({ jobId: job.id, vhTaskId: taskId }, "Scan job dispatched");
+      allFailedTransient = false;
+      noteVhSuccess();
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.error({ err, jobId: job.id }, "Failed to dispatch scan job");
-      await storage.markFailed(job.id, reason.slice(0, 2000));
+      const transient = isTransientVhError(err);
+      if (!transient) allFailedTransient = false;
+      // attempt is current claim count; requeue if under max
+      if (job.attempt + 1 < DISPATCH_MAX_ATTEMPTS) {
+        await storage.requeueDispatching(job.id, reason);
+        logger.warn(
+          { jobId: job.id, attempt: job.attempt + 1 },
+          "Dispatch failed — requeued for retry",
+        );
+      } else {
+        await storage.markFailed(job.id, reason.slice(0, 2000));
+      }
     }
+  }
+
+  if (attempted > 0 && allFailedTransient) {
+    noteVhOutage("dispatch");
   }
 }
 
-async function pollOnce(): Promise<void> {
+async function pollOnce(gracePolls: number): Promise<void> {
+  if (Date.now() < pollNotBefore) return;
+
   const jobs = await storage.listScanningJobs();
   if (jobs.length === 0) return;
 
   const vh = getVulnHunterClient();
+  let successes = 0;
+  let transientFails = 0;
 
   for (const job of jobs) {
     if (!job.vulnhunter_task_id) continue;
     try {
       const { state } = await vh.getTask(job.vulnhunter_task_id);
+      successes += 1;
+
       if (state === "completed") {
-        await syncFindings(job.id, job.project_id, job.vulnhunter_task_id);
-        await storage.markCompleted(job.id);
+        await syncCompletedFindings(job.id, job.project_id, job.vulnhunter_task_id);
         logger.info({ jobId: job.id }, "Scan job completed, findings synced");
-      } else if (state === "failed" || state === "cancelled") {
-        await storage.markFailed(job.id, `vh_state:${state}`);
-        logger.warn({ jobId: job.id, vhState: state }, "Scan job failed upstream");
+      } else if (state === "cancelled") {
+        await storage.markFailed(job.id, "vh_state:cancelled");
+        logger.warn({ jobId: job.id }, "Scan job cancelled upstream");
+      } else if (state === "failed") {
+        const n = await storage.bumpConsecutiveFailures(job.id);
+        if (n >= gracePolls) {
+          await storage.markFailed(job.id, `vh_state:failed (x${n})`);
+          logger.warn({ jobId: job.id, strikes: n }, "Scan job failed upstream (grace exhausted)");
+        } else {
+          logger.warn(
+            { jobId: job.id, strikes: n, grace: gracePolls },
+            "VH failed — grace poll, keeping scanning",
+          );
+        }
+      } else if (
+        state === "running" ||
+        state === "preparing" ||
+        state === "queued" ||
+        state === "paused"
+      ) {
+        await storage.resetConsecutiveFailures(job.id);
+        // Live so_far: list-only count (no detail / no encrypt / no row writes)
+        try {
+          const n = await countIngestibleFromList(job.vulnhunter_task_id);
+          await storage.updateFindingsSoFar(job.id, n);
+        } catch (err) {
+          logger.warn({ err, jobId: job.id }, "so_far list count failed (will retry)");
+        }
       }
-      // queued/preparing/running/paused → keep scanning
     } catch (err) {
-      logger.error({ err, jobId: job.id }, "Poll error (will retry next cycle)");
+      if (isTransientVhError(err)) {
+        transientFails += 1;
+        logger.error({ err, jobId: job.id }, "Poll transient error (will retry)");
+      } else {
+        successes += 1; // non-transient on one job shouldn't trigger full outage
+        logger.error({ err, jobId: job.id }, "Poll error (will retry next cycle)");
+      }
     }
+  }
+
+  if (successes > 0) {
+    noteVhSuccess();
+  } else if (transientFails > 0 && successes === 0) {
+    noteVhOutage("poll");
   }
 }
 
-async function syncFindings(scanJobId: string, projectId: string, vhTaskId: string): Promise<void> {
+/** scanning path: list + filter count only. */
+async function countIngestibleFromList(vhTaskId: string): Promise<number> {
   const vh = getVulnHunterClient();
   const metas = await vh.listFindings(vhTaskId);
-
-  // BUG-1: latest completed scan replaces project findings (no cumulative double-count).
-  // Preserve prior disclosure decisions when finding_key matches across rescans.
-  const priorDisclosure = await findingsStorage.listDisclosureByKey(projectId);
-  const removed = await findingsStorage.deleteAllForProject(projectId);
-  if (removed > 0) {
-    logger.info({ projectId, scanJobId, removed }, "Cleared prior findings before resync");
+  let publicCount = 0;
+  for (const meta of metas) {
+    if (!shouldIngestFinding(meta, null)) continue;
+    const mapped = mapFindingSeverity(meta, null);
+    if (mapped.severity !== "info") publicCount += 1;
   }
+  return publicCount;
+}
+
+interface PreparedFindingRow {
+  id: string;
+  findingKey: string;
+  severity: SeverityStored;
+  cwe: string | null;
+  encPayload: string;
+  cvssScore: number | null;
+  cvssVector: string | null;
+  pocStatus: string;
+  itemType: string;
+  vhSeverity: string | null;
+}
+
+/**
+ * completed path:
+ *  A) slow IO outside txn — list + detail + encrypt into memory
+ *  B) single txn — disclosure snapshot, delete, insert, flip pointer, markCompleted
+ */
+async function syncCompletedFindings(
+  scanJobId: string,
+  projectId: string,
+  vhTaskId: string,
+): Promise<number> {
+  const vh = getVulnHunterClient();
+  const cfg = loadConfig();
+  if (!cfg.adminPublicKeyPem) {
+    throw new Error("ADMIN_PUBLIC_KEY required to encrypt findings");
+  }
+
+  const metas = await vh.listFindings(vhTaskId);
+  const prepared: PreparedFindingRow[] = [];
+  let publicCount = 0;
 
   for (const meta of metas) {
     let detail: unknown = null;
@@ -104,7 +437,12 @@ async function syncFindings(scanJobId: string, projectId: string, vhTaskId: stri
       logger.warn({ err, key: meta.key }, "Failed to fetch finding detail; storing meta only");
     }
 
-    const detailObj = (detail && typeof detail === "object" ? detail : {}) as Record<string, unknown>;
+    if (!shouldIngestFinding(meta, detail)) continue;
+
+    const detailObj = (detail && typeof detail === "object" ? detail : {}) as Record<
+      string,
+      unknown
+    >;
     const title =
       (typeof meta.title === "string" && meta.title) ||
       (typeof detailObj.title === "string" && detailObj.title) ||
@@ -117,22 +455,172 @@ async function syncFindings(scanJobId: string, projectId: string, vhTaskId: stri
       (typeof meta.primary_file === "string" && meta.primary_file) ||
       (typeof detailObj.primary_file === "string" && detailObj.primary_file) ||
       null;
+    const pocStatus =
+      pickString(meta.poc_status, detailObj.poc_status, detailObj.pocStatus) ?? "unknown";
+    const itemType =
+      pickString(meta.item_type, detailObj.item_type, detailObj.itemType) ?? "finding";
 
-    const prev = priorDisclosure.get(meta.key);
-    await findingsStorage.upsertFinding({
-      projectId,
-      scanJobId,
-      findingKey: meta.key,
-      severity: normalizeSeverity(meta.severity),
+    const mapped = mapFindingSeverity(meta, detail);
+    if (mapped.severity !== "info") publicCount += 1;
+
+    // Byte-faithful report.yaml via VH artifacts preview (path findings/<key>/report.yaml)
+    let reportYaml: string | null = null;
+    try {
+      const prev = await vh.getArtifactFilePreview(
+        vhTaskId,
+        `findings/${meta.key}/report.yaml`,
+      );
+      if (prev?.kind === "text" && typeof prev.content === "string" && prev.content.length > 0) {
+        reportYaml = prev.content;
+      }
+    } catch (err) {
+      logger.warn({ err, key: meta.key }, "report.yaml preview failed");
+    }
+
+    const findingId = randomUUID();
+    const encPayload = encryptForAdmin(cfg.adminPublicKeyPem, findingId, {
       title,
+      primary_file: primaryFile,
+      detail: detail ?? meta,
+      report_yaml: reportYaml,
+    });
+
+    prepared.push({
+      id: findingId,
+      findingKey: meta.key,
+      severity: mapped.severity,
       cwe,
-      primaryFile,
-      detailJson: detail ?? meta,
-      disclosureState: prev?.state,
-      disclosedAt: prev?.disclosedAt ?? null,
-      disclosedBy: prev?.disclosedBy ?? null,
+      encPayload,
+      cvssScore: mapped.cvssScore,
+      cvssVector: mapped.cvssVector,
+      pocStatus,
+      itemType,
+      vhSeverity: mapped.vhSeverity,
     });
   }
+
+  const db = getDb();
+  await db.begin(async (tx) => {
+    const priorDisclosure = await findingsStorage.listDisclosureByKey(projectId, tx);
+    // Snapshot disclosed_files before CASCADE delete of findings
+    type PriorFile = {
+      finding_key: string;
+      kind: string;
+      rel_path: string;
+      file_name: string;
+      content: string;
+    };
+    const priorFiles = (await tx`
+      SELECT f.finding_key, df.kind, df.rel_path, df.file_name, df.content
+      FROM disclosed_files df
+      JOIN findings f ON f.id = df.finding_id
+      WHERE df.project_id = ${projectId}::uuid
+    `) as unknown as PriorFile[];
+    const filesByKey = new Map<string, PriorFile[]>();
+    for (const f of priorFiles) {
+      const list = filesByKey.get(f.finding_key) ?? [];
+      list.push(f);
+      filesByKey.set(f.finding_key, list);
+    }
+
+    const removed = await findingsStorage.deleteAllForProject(projectId, tx);
+    if (removed > 0) {
+      logger.info({ projectId, scanJobId, removed }, "Cleared prior findings before resync");
+    }
+
+    for (const row of prepared) {
+      const prev = priorDisclosure.get(row.findingKey);
+      await findingsStorage.upsertEncryptedFinding(
+        {
+          id: row.id,
+          projectId,
+          scanJobId,
+          findingKey: row.findingKey,
+          severity: row.severity,
+          cwe: row.cwe,
+          encPayload: row.encPayload,
+          disclosureState: prev?.state,
+          disclosedAt: prev?.disclosedAt ?? null,
+          disclosedTitle: prev?.disclosedTitle ?? null,
+          disclosedSummary: prev?.disclosedSummary ?? null,
+          disclosedReportYaml: prev?.disclosedReportYaml ?? null,
+          cvssScore: row.cvssScore,
+          cvssVector: row.cvssVector,
+          pocStatus: row.pocStatus,
+          itemType: row.itemType,
+          vhSeverity: row.vhSeverity,
+        },
+        tx,
+      );
+      // Restore disclosed_files under new finding id
+      const retained = filesByKey.get(row.findingKey) ?? [];
+      for (const file of retained) {
+        await tx`
+          INSERT INTO disclosed_files (finding_id, project_id, kind, rel_path, file_name, content)
+          VALUES (
+            ${row.id}::uuid,
+            ${projectId}::uuid,
+            ${file.kind},
+            ${file.rel_path},
+            ${file.file_name},
+            ${file.content}
+          )
+          ON CONFLICT (finding_id, rel_path) DO NOTHING
+        `;
+      }
+    }
+
+    await storage.updateFindingsSoFar(scanJobId, publicCount, tx);
+    await storage.setCurrentScanJob(projectId, scanJobId, tx);
+    await storage.markCompleted(scanJobId, tx);
+  });
+
+  // Phase C: harvest poc/exp text (best-effort, after findings committed).
+  // CASCADE already cleared old artifacts with findings delete.
+  try {
+    await harvestFindingArtifacts({
+      projectId,
+      scanJobId,
+      vhTaskId,
+      findings: prepared.map((r) => ({ findingId: r.id, findingKey: r.findingKey })),
+    });
+  } catch (err) {
+    logger.warn({ err, scanJobId }, "Artifact harvest failed (findings still saved)");
+  }
+
+  return publicCount;
+}
+
+/**
+ * Admin force-resync: failed job whose VH task is completed → full sync.
+ * Returns result descriptor for HTTP layer.
+ */
+export async function adminResyncScanJob(
+  jobId: string,
+): Promise<{ ok: true; publicCount: number } | { ok: false; reason: string; vhState?: string }> {
+  const job = await storage.getScanJob(jobId);
+  if (!job) return { ok: false, reason: "not_found" };
+  if (job.state !== "failed") return { ok: false, reason: "not_failed", vhState: job.state };
+  if (!job.vulnhunter_task_id) return { ok: false, reason: "no_vh_task" };
+
+  const vh = getVulnHunterClient();
+  let state: string;
+  try {
+    ({ state } = await vh.getTask(job.vulnhunter_task_id));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: `vh_unreachable: ${msg.slice(0, 200)}` };
+  }
+
+  if (state !== "completed") {
+    return { ok: false, reason: "vh_not_completed", vhState: state };
+  }
+
+  // revive so concurrent poller doesn't double-mark; sync is idempotent via txn
+  await storage.reviveFailedForResync(job.id);
+  const publicCount = await syncCompletedFindings(job.id, job.project_id, job.vulnhunter_task_id);
+  logger.info({ jobId: job.id, publicCount }, "Admin resync completed");
+  return { ok: true, publicCount };
 }
 
 export function startScanLoops(config: ServiceConfig): void {
@@ -140,24 +628,35 @@ export function startScanLoops(config: ServiceConfig): void {
   running = true;
 
   const runDispatch = () => {
-    dispatchOnce(config.scan.concurrency).catch((err) =>
-      logger.error({ err }, "dispatcher tick failed"),
-    );
+    if (dispatchBusy) return;
+    dispatchBusy = true;
+    const conc = getEffectiveConcurrency(config.scan.concurrency);
+    dispatchOnce(conc)
+      .catch((err) => logger.error({ err }, "dispatcher tick failed"))
+      .finally(() => {
+        dispatchBusy = false;
+      });
   };
   const runPoll = () => {
-    pollOnce().catch((err) => logger.error({ err }, "poller tick failed"));
+    if (pollBusy) return;
+    pollBusy = true;
+    pollOnce(config.scan.vhFailGracePolls)
+      .catch((err) => logger.error({ err }, "poller tick failed"))
+      .finally(() => {
+        pollBusy = false;
+      });
   };
 
-  // Kick immediately, then interval
   runDispatch();
   runPoll();
   dispatcherTimer = setInterval(runDispatch, config.scan.dispatcherIntervalMs);
   pollerTimer = setInterval(runPoll, config.scan.pollerIntervalMs);
   logger.info(
     {
-      concurrency: config.scan.concurrency,
+      concurrency: getEffectiveConcurrency(config.scan.concurrency),
       dispatcherMs: config.scan.dispatcherIntervalMs,
       pollerMs: config.scan.pollerIntervalMs,
+      vhFailGracePolls: config.scan.vhFailGracePolls,
     },
     "Scan dispatcher + poller started",
   );
@@ -169,7 +668,28 @@ export function stopScanLoops(): void {
   dispatcherTimer = null;
   pollerTimer = null;
   running = false;
+  dispatchBusy = false;
+  pollBusy = false;
 }
 
-/** Test helpers */
-export const _internal = { dispatchOnce, pollOnce, syncFindings, normalizeSeverity };
+export const _internal = {
+  dispatchOnce,
+  pollOnce,
+  syncCompletedFindings,
+  countIngestibleFromList,
+  mapFindingSeverity,
+  shouldIngestFinding,
+  setRuntimeConcurrency,
+  getScanConfigView,
+  noteVhOutage,
+  noteVhSuccess,
+  get backoffState() {
+    return { vhOutageStrikes, pollNotBefore, dispatchNotBefore };
+  },
+  resetBackoffForTests() {
+    vhOutageStrikes = 0;
+    pollNotBefore = 0;
+    dispatchNotBefore = 0;
+    runtimeConcurrency = null;
+  },
+};

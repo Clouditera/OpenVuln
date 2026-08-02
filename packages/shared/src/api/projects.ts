@@ -1,7 +1,11 @@
 import type { ScanJobState, Severity } from "../domain.js";
 
-/** Severity counts for public aggregation. */
+/** Severity counts for public aggregation (NVD four tiers, no info). */
 export type SeverityCounts = Record<Severity, number>;
+
+export function emptySeverityCounts(): SeverityCounts {
+  return { critical: 0, high: 0, medium: 0, low: 0 };
+}
 
 export interface ProjectCard {
   id: string;
@@ -19,6 +23,7 @@ export interface ProjectCard {
     commit_sha: string | null;
     created_at: string;
     finished_at: string | null;
+    findings_so_far?: number;
   } | null;
   severity_counts: SeverityCounts;
   created_at: string;
@@ -43,6 +48,18 @@ export interface DisclosedFindingSummary {
   title: string;
   cwe: string | null;
   disclosed_at: string | null;
+  /** Short operator note (optional). */
+  summary?: string | null;
+  /**
+   * Structured report parsed from original report.yaml (disclosed + fidelity only).
+   * Prefer this for Details UI. Raw yaml available via download ?format=yaml.
+   */
+  report?: {
+    metadata: Record<string, unknown>;
+    description: Record<string, unknown>;
+    code: Record<string, unknown>;
+    references: unknown;
+  } | null;
 }
 
 export interface ProjectPublicView {
@@ -62,6 +79,7 @@ export interface ProjectPublicView {
     created_at: string;
     started_at: string | null;
     finished_at: string | null;
+    findings_so_far?: number;
   } | null;
   severity_counts: SeverityCounts;
   cwe_distribution: CweCount[];

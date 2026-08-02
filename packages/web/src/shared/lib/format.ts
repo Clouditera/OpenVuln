@@ -39,10 +39,10 @@ export function shortSha(sha: string | null | undefined): string {
 }
 
 export function totalFindings(c: SeverityCounts): number {
-  return c.high + c.medium + c.low + c.info;
+  return c.critical + c.high + c.medium + c.low;
 }
 
-export const SEV_ORDER: Severity[] = ["high", "medium", "low", "info"];
+export const SEV_ORDER: Severity[] = ["critical", "high", "medium", "low"];
 
 export function severityLabel(s: Severity): string {
   return s.charAt(0).toUpperCase() + s.slice(1);

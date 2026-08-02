@@ -36,3 +36,15 @@ tmp/
 
 # local QA evidence dumps (keep docs/qa reports if intentional)
 # docs/qa/regression/
+.env.vh
+
+# HF
+.cache/
+*.sqlite
+docs/qa/artifacts/
+# QA evidence dumps (keep *.md reports only)
+docs/qa/**/artifacts/
+docs/qa/**/*.json
+docs/qa/**/*.txt
+docs/qa/**/*.html
+!docs/qa/**/*.md
