@@ -1,0 +1,20 @@
+# OpenVuln public backend on VulnAgent
+# Usage (on server):
+#   cd ~/openvuln && docker compose up -d
+services:
+  openvuln:
+    image: openvuln:allinone
+    container_name: openvuln-api
+    restart: unless-stopped
+    ports:
+      # fish: backend on host 23100 (localhost only — nginx terminates TLS)
+      - "127.0.0.1:23100:7860"
+    env_file:
+      - .env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "7860"
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

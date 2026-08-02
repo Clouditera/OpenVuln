@@ -18,8 +18,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Empty / unset → same-origin relative paths (VulnAgent nginx SPA + /api).
+ * HF Static build sets VITE_API_BASE_URL=https://openvuln.vulnhunter.pro
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+
+/** Absolute or root-relative URL for API paths and download links. */
+export function apiUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE}${p}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     credentials: "include",
     ...init,
     headers: {

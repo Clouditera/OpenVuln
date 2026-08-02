@@ -48,9 +48,8 @@ COPY --from=builder /app ./
 RUN chown -R node:node /app
 
 COPY --from=builder /workspace/deploy/space-entrypoint.sh /usr/local/bin/space-entrypoint
-RUN chmod 0755 /usr/local/bin/space-entrypoint \
-  && # entrypoint must stay root-owned so it can chown HF /data mounts
-     true
+# entrypoint stays root-owned so it can chown HF /data mounts at runtime
+RUN chmod 0755 /usr/local/bin/space-entrypoint
 
 EXPOSE 7860
 

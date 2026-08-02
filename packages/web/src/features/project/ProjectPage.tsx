@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowUpRight, ChevronDown, ExternalLink, Download } from "lucide-react";
-import { api } from "../../shared/api/client";
+import { api, apiUrl } from "../../shared/api/client";
 import {
   formatDate,
   formatStars,
@@ -256,7 +256,7 @@ export function ProjectPage() {
                     </h2>
                     <div className="flex items-center gap-3 text-[13px]">
                       <a
-                        href={`/api/projects/${project.id}/report?format=zip`}
+                        href={apiUrl(`/api/projects/${project.id}/report?format=zip`)}
                         className="inline-flex items-center gap-1 text-ink-secondary hover:text-accent-600"
                       >
                         <Download size={14} /> Download all (zip)
@@ -289,7 +289,7 @@ export function ProjectPage() {
                             <td className="px-3 py-3 text-[13px] text-success">Disclosed</td>
                             <td className="px-3 py-3 text-right">
                               <a
-                                href={`/api/projects/${project.id}/report/${encodeURIComponent(f.finding_key)}`}
+                                href={apiUrl(`/api/projects/${project.id}/report/${encodeURIComponent(f.finding_key)}`)}
                                 className="text-ink-tertiary hover:text-accent-600"
                                 title="Download full report (markdown)"
                                 download
@@ -360,7 +360,7 @@ export function ProjectPage() {
                     </div>
                     <span className="flex shrink-0 items-center gap-2 self-center">
                       <a
-                        href={`/api/projects/${project.id}/report/${encodeURIComponent(f.finding_key)}`}
+                        href={apiUrl(`/api/projects/${project.id}/report/${encodeURIComponent(f.finding_key)}`)}
                         className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-xs font-medium text-ink-secondary hover:border-accent-300 hover:text-accent-700"
                         download
                         onClick={(e) => e.stopPropagation()}
