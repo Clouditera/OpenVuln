@@ -351,7 +351,7 @@ export function ProjectPage() {
                         <span className="text-[12px] text-success">Disclosed</span>
                       </div>
                       <h3
-                        className="line-clamp-2 font-display text-base font-semibold leading-snug text-ink"
+                        className="line-clamp-2 font-display text-[15px] font-semibold leading-snug text-ink"
                         title={f.title}
                       >
                         {f.title}
