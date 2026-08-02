@@ -34,6 +34,19 @@ Compose (Postgres only by default) lives in `deploy/docker-compose.yml`. Uncomme
 
 ## Hugging Face Docker Space
 
+### Embedded Postgres boot (all-in-one image)
+
+Root `Dockerfile` starts as **root** so `deploy/space-entrypoint.sh` can:
+
+1. `chown` the HF persistent `/data` mount to `node`
+2. `initdb` + `pg_ctl` as `node` under `/data/postgresql`
+3. wait until TCP `127.0.0.1:5432` accepts connections
+4. drop privileges and run `node dist/main.js` as `node` (full env/secrets preserved)
+
+If the Space process is forced to uid 1000 **and** `/data` is root-owned `0755`, initdb will fail with `Permission denied` — the root entrypoint avoids that. After a failed first boot, Factory reboot once the new image is live; incomplete clusters are auto-reset when `PG_VERSION` exists without `global/` / `pg_notify/`.
+
+Required secrets for embedded mode: `POSTGRES_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` (plus app secrets). Do **not** set `DATABASE_URL` to a dead local URL — leave it unset so entrypoint builds `postgresql://openvuln:…@127.0.0.1:5432/openvuln`.
+
 1. Create a **Docker** Space, SDK = Docker, hardware CPU basic is enough for the queue (concurrency 4).
 2. Point the Space at this repo; Dockerfile path: `deploy/Dockerfile` (or copy to `/Dockerfile` if HF requires root).
 3. Space **Secrets / Variables** (never commit):
