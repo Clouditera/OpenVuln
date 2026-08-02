@@ -81,6 +81,7 @@ export function HomePage() {
       modules: [Mousewheel, Keyboard, Pagination],
       direction: "vertical",
       slidesPerView: 1,
+      simulateTouch: false, // 鼠标拖拽会 preventDefault 阻断文本选择；滚轮/键盘/圆点已覆盖桌面导航
       speed: 620,
       mousewheel: { thresholdDelta: 4, noMousewheelClass: "swiper-no-mousewheel" },
       keyboard: { enabled: true, onlyInViewport: true },

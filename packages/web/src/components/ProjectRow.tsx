@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import type { ProjectCard } from "@openvuln/shared";
 import { formatRelativeTime, formatStars, totalFindings } from "../shared/lib/format";
 import { SeverityBar } from "./SeverityBar";
@@ -30,6 +30,7 @@ function OwnerAvatar({ owner }: { owner: string }) {
 }
 
 export function ProjectRow({ project }: { project: ProjectCard }) {
+  const nav = useNavigate();
   const state = project.latest_scan?.state;
   const scanning = state === "scanning" || state === "dispatching";
   const waiting = state !== "completed" && !scanning;
@@ -37,9 +38,14 @@ export function ProjectRow({ project }: { project: ProjectCard }) {
   const findings = totalFindings(project.severity_counts);
 
   return (
-    <Link
-      to={`/p/${project.owner_login}/${project.name}`}
-      className="group block border-b border-line px-1 py-4 transition-colors hover:bg-accent-50/40 focus-ring rounded-sm"
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={() => nav(`/p/${project.owner_login}/${project.name}`)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") nav(`/p/${project.owner_login}/${project.name}`);
+      }}
+      className="group block cursor-pointer border-b border-line px-1 py-4 transition-colors hover:bg-accent-50/40 focus-ring rounded-sm"
     >
       <div className="flex items-start gap-3">
         <OwnerAvatar owner={project.owner_login} />
@@ -103,6 +109,6 @@ export function ProjectRow({ project }: { project: ProjectCard }) {
           </div>
         </div>
       </div>
-    </Link>
+    </div>
   );
 }

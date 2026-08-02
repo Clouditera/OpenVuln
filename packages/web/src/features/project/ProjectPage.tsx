@@ -329,11 +329,18 @@ export function ProjectPage() {
                   key={f.id}
                   className="overflow-hidden rounded-md border border-line bg-surface-raised"
                 >
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setOpenKey(open ? null : f.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setOpenKey(open ? null : f.id);
+                      }
+                    }}
                     aria-expanded={open}
-                    className="flex w-full items-start gap-3 px-5 py-4 text-left transition-colors hover:bg-surface-sunken/50 focus-ring sm:px-6"
+                    className="flex w-full cursor-pointer items-start gap-3 px-5 py-4 text-left transition-colors hover:bg-surface-sunken/50 focus-ring sm:px-6"
                   >
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -367,7 +374,7 @@ export function ProjectPage() {
                         className={`text-ink-tertiary transition-transform ${open ? "rotate-180" : ""}`}
                       />
                     </span>
-                  </button>
+                  </div>
                   {open && (
                     <div className="border-t border-line px-5 pb-5 sm:px-6 sm:pb-6">
                       {f.report ? (
