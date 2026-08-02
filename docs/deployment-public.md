@@ -1,7 +1,7 @@
 # OpenVuln public deploy — HF Static frontend + VulnAgent backend
 
-> Status: **backend live on VulnAgent** — TLS blocked on DNS NXDOMAIN for openvuln.vulnhunter.pro  
-> Live: container `openvuln-api` → `127.0.0.1:23100`, nginx Host openvuln.vulnhunter.pro (HTTP), SPA `/var/www/openvuln`, empty DB + redis import 22  
+> Status: **backend live on VulnAgent** — TLS blocked on DNS NXDOMAIN for openvuln.clouditera.com  
+> Live: container `openvuln-api` → `127.0.0.1:23100`, nginx Host openvuln.clouditera.com (HTTP), SPA `/var/www/openvuln`, empty DB + redis import 22  
 > Host: `VulnAgent` = `47.94.46.24` (Aliyun ECS, Ubuntu 24.04, Docker 29)  
 > Date: 2026-08-02
 
@@ -113,11 +113,11 @@ Need a DNS A/AAAA → `47.94.46.24`, e.g.:
 ```nginx
 server {
     listen 443 ssl;
-    server_name openvuln.example.com;   # ← fish domain
+    server_name openvuln.clouditera.com;   # ← fish domain
 
     # certbot --nginx  or copy LE paths after first issue
-    ssl_certificate     /etc/letsencrypt/live/openvuln.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/openvuln.example.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/openvuln.clouditera.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/openvuln.clouditera.com/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
@@ -136,7 +136,7 @@ server {
 
 server {
     listen 80;
-    server_name openvuln.example.com;
+    server_name openvuln.clouditera.com;
     return 301 https://$host$request_uri;
 }
 ```
@@ -144,7 +144,7 @@ server {
 Issue cert after DNS propagates:
 
 ```bash
-sudo certbot --nginx -d openvuln.example.com
+sudo certbot --nginx -d openvuln.clouditera.com
 ```
 
 **No Caddy** unless fish prefers moving all TLS off nginx later.
@@ -166,7 +166,7 @@ sudo certbot --nginx -d openvuln.example.com
 | `VULNHUNTER_MOCK` | `false` |
 | `VH_SOURCE_MODE` | `archive` |
 | `SCAN_CONCURRENCY` | `2`–`4` (share CPU with VH workers) |
-| `PUBLIC_BASE_URL` | `https://openvuln.example.com` |
+| `PUBLIC_BASE_URL` | `https://openvuln.clouditera.com` |
 | `CORS_ALLOWED_ORIGINS` | HF frontend origin(s), comma-separated |
 | `HOST` | `0.0.0.0` |
 | `PORT` | `7860` |
@@ -204,7 +204,7 @@ Same for download `<a href>` in `ProjectPage` (report zip/md links).
 Build:
 
 ```bash
-VITE_API_BASE_URL=https://openvuln.example.com pnpm --filter @openvuln/web build
+VITE_API_BASE_URL=https://openvuln.clouditera.com pnpm --filter @openvuln/web build
 ```
 
 Upload `packages/web/dist/**` to HF **Static** Space.
@@ -279,7 +279,7 @@ Admin private key: use **same** keypair as disclose channel if you want continui
 ```bash
 # disclose (laptop)
 pnpm --filter @openvuln/admin-cli exec node dist/cli.js fetch-package \
-  --api https://openvuln.example.com --token "$ADMIN_TOKEN" \
+  --api https://openvuln.clouditera.com --token "$ADMIN_TOKEN" \
   --project <uuid> --out /tmp/pkg.json
 pnpm --filter @openvuln/admin-cli exec node dist/cli.js decrypt /tmp/pkg.json \
   --key ~/.openvuln/hf-prod/admin.pem --out /tmp/plain.json
