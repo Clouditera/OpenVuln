@@ -46,7 +46,7 @@ docker compose -f deploy/docker-compose.yml up -d postgres
 docker exec deploy-postgres-1 psql -U openvuln -d postgres \
   -c "CREATE DATABASE openvuln_test OWNER openvuln;" 2>/dev/null || true
 
-cp .env.example .env
+cp deploy/.env.example .env
 # edit .env — set VULNHUNTER_* and ADMIN_* for your environment
 
 pnpm --filter @openvuln/shared build
@@ -81,7 +81,7 @@ pnpm --filter @openvuln/service test
 
 ## Configuration
 
-See [`.env.example`](./.env.example). Important knobs:
+See [`deploy/.env.example`](./deploy/.env.example) (local) and [`deploy/.env.prod.example`](./deploy/.env.prod.example) (production split). Important knobs:
 
 | Variable | Purpose |
 |---|---|

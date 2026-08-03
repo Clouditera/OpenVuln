@@ -74,7 +74,7 @@ Suggested data root on host:
 
 | Name | Image | Network | Volume |
 |---|---|---|---|
-| `openvuln-api` | `openvuln:allinone` (build from monorepo root `Dockerfile`) | `bridge` (default) **or** optional `openvuln-net` | `./data:/data` |
+| `openvuln-api` | `openvuln:allinone` (build `deploy/api/Dockerfile`) | `bridge` (default) **or** optional `openvuln-net` | `./data:/data` |
 
 ### Compose sketch (final file under `deploy/public/docker-compose.yml` when executing)
 
@@ -295,7 +295,7 @@ Update image:
 
 ```bash
 # build on laptop or on server
-docker build -t openvuln:allinone .
+docker build -f deploy/api/Dockerfile -t openvuln:api .
 docker save openvuln:allinone | ssh VulnAgent docker load
 ssh VulnAgent 'cd ~/openvuln && docker compose up -d'
 ```
@@ -306,7 +306,7 @@ ssh VulnAgent 'cd ~/openvuln && docker compose up -d'
 
 1. [ ] DNS A record → `47.94.46.24`
 2. [ ] Frontend: add `VITE_API_BASE_URL` support in `client.ts` + download links
-3. [ ] `deploy/public/docker-compose.yml` + `.env.example`
+3. [ ] `deploy/compose.prod.yml` + `deploy/.env.prod.example`
 4. [ ] Build/push `openvuln:allinone` to VulnAgent
 5. [ ] Start container; verify `curl -s http://127.0.0.1:17860/health`
 6. [ ] nginx site + `certbot --nginx -d <domain>`
@@ -454,4 +454,4 @@ Host nginx keeps TLS for `openvuln.clouditera.com` and `proxy_pass http://127.0.
 
 ### Deprecated
 
-Root `Dockerfile` + `deploy/space-entrypoint.sh` (HF all-in-one with embedded PG/MinIO) remain for legacy/HF Docker experiments only. Prefer `deploy/compose.prod.yml`.
+Root `Dockerfile` / `deploy/Dockerfile` / `space-entrypoint.sh` **removed**. Use `deploy/compose.prod.yml` + `deploy/api|web` only.

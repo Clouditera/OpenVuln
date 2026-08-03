@@ -12,6 +12,8 @@ packages/service/public/
 .env
 .env.*
 !.env.example
+!deploy/.env.example
+!deploy/.env.prod.example
 *.pem
 *.key
 id_rsa*
