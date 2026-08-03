@@ -58,6 +58,15 @@ export interface ServiceConfig {
   };
   adminToken: string;
   adminPublicKeyPem: string;
+  smtp: {
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    password: string;
+    from: string;
+  };
+  notify: { emailEnabled: boolean };
   log: { level: string };
 }
 
@@ -135,6 +144,17 @@ export function loadConfig(): ServiceConfig {
     },
     adminToken,
     adminPublicKeyPem,
+    smtp: {
+      host: optionalEnv("SMTP_HOST", ""),
+      port: Number(optionalEnv("SMTP_PORT", "465")),
+      secure: optionalEnv("SMTP_SECURE", "true") === "true",
+      user: optionalEnv("SMTP_USER", ""),
+      password: optionalEnv("SMTP_PASSWORD", "") || optionalEnv("SMTP_PASS", ""),
+      from: optionalEnv("SMTP_FROM", ""),
+    },
+    notify: {
+      emailEnabled: optionalEnv("NOTIFY_EMAIL_ENABLED", "true") === "true",
+    },
     log: {
       level: optionalEnv("LOG_LEVEL", "info"),
     },

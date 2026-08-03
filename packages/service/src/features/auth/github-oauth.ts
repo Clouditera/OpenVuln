@@ -30,6 +30,28 @@ export async function exchangeCodeForToken(
   return data.access_token;
 }
 
+/** Primary verified email from GET /user/emails (needs user:email scope). */
+export async function fetchGithubPrimaryEmail(token: string): Promise<string | null> {
+  const res = await fetch("https://api.github.com/user/emails", {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "user-agent": "OpenVuln",
+    },
+  });
+  if (!res.ok) return null;
+  const list = (await res.json()) as Array<{
+    email?: string;
+    primary?: boolean;
+    verified?: boolean;
+  }>;
+  if (!Array.isArray(list)) return null;
+  const primary = list.find((e) => e.primary && e.verified && e.email);
+  if (primary?.email) return primary.email;
+  const any = list.find((e) => e.verified && e.email);
+  return any?.email ?? null;
+}
+
 export async function fetchGithubUser(token: string): Promise<{
   id: number;
   login: string;

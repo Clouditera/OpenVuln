@@ -34,6 +34,11 @@ function toScanSummary(scan: ScanJobRow | null) {
   };
 }
 
+export async function projectToCard(project: ProjectRow): Promise<ProjectCard> {
+  const counts = await findingsStorage.severityCounts(project.id);
+  return toCard(project, counts);
+}
+
 async function toCard(project: ProjectRow, counts: SeverityCounts): Promise<ProjectCard> {
   const latest = await scanStorage.getLatestScanForProject(project.id);
   return {

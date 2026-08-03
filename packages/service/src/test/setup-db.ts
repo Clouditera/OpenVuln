@@ -57,7 +57,7 @@ export async function cleanTables(): Promise<void> {
   const db = getDb();
   await db`
     TRUNCATE findings, finding_artifacts, scan_jobs, projects, admin_nonces,
-      sessions, github_identities, repo_access_grants, submit_rate_limits
+      sessions, github_identities, repo_access_grants, submit_rate_limits, notifications
     CASCADE
   `;
 }

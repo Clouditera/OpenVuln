@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { adminRouter } from "./features/admin/index.js";
 import { authRouter } from "./features/auth/index.js";
+import { notificationsRouter } from "./features/notifications/index.js";
 import { projectsRouter } from "./features/projects/index.js";
 import { reportRouter } from "./features/report/index.js";
 import { statsRouter } from "./features/stats/index.js";
@@ -67,6 +68,7 @@ export function createApp(config: ServiceConfig): Hono {
   });
 
   app.route("/api/stats", statsRouter);
+  app.route("/api/notifications", notificationsRouter);
 
   // Public disclosed report (no auth) — mount before /:owner/:repo
   app.route("/api/projects/:id/report", reportRouter);

@@ -4,6 +4,7 @@ import { logger } from "./infra/logger.js";
 import { initDb, closeDb, runMigrations } from "./infra/db/index.js";
 import { initVulnHunterClient } from "./features/vulnhunter/index.js";
 import { startScanLoops, stopScanLoops } from "./features/scans/index.js";
+import { startMailer, stopMailer } from "./features/notifications/index.js";
 import { createApp } from "./server.js";
 
 async function main(): Promise<void> {
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
 
   initVulnHunterClient(config);
   startScanLoops(config);
+  startMailer(config);
 
   const app = createApp(config);
 
@@ -27,6 +29,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutting down");
     stopScanLoops();
+    stopMailer();
     server.close();
     await closeDb();
     process.exit(0);

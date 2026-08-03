@@ -20,6 +20,7 @@
     "hono": "^4.7.4",
     "js-yaml": "^5.2.3",
     "jszip": "^3.10.1",
+    "nodemailer": "^9.0.3",
     "pino": "^9.6.0",
     "postgres": "^3.4.5",
     "zod": "^3.24.1"
@@ -27,6 +28,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
+    "@types/nodemailer": "^8.0.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.9"
   }

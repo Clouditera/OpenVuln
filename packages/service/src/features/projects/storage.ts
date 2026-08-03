@@ -77,6 +77,19 @@ export async function findByFullName(owner: string, repo: string): Promise<Proje
   return rows[0] ?? null;
 }
 
+export async function listBySubmitter(githubUserId: number): Promise<ProjectRow[]> {
+  const db = getDb();
+  return db<ProjectRow[]>`
+    SELECT
+      id::text, github_repo_id::text, owner_login, name, full_name, html_url,
+      description, language, stars, default_branch, created_at, updated_at, removed_at
+    FROM projects
+    WHERE submitted_by = ${githubUserId} AND removed_at IS NULL
+    ORDER BY created_at DESC
+    LIMIT 100
+  `;
+}
+
 export async function findById(id: string): Promise<ProjectRow | null> {
   const db = getDb();
   const rows = await db<ProjectRow[]>`

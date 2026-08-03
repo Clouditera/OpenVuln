@@ -4,6 +4,7 @@ import type { ServiceConfig } from "../../infra/config.js";
 import { AppError } from "../../middleware/error-handler.js";
 import {
   exchangeCodeForToken,
+  fetchGithubPrimaryEmail,
   fetchGithubUser,
   signOAuthState,
   verifyOAuthState,
@@ -26,7 +27,7 @@ authRouter.get("/github/login", async (c) => {
   const params = new URLSearchParams({
     client_id: cfg.githubOAuth.clientId,
     redirect_uri: cfg.githubOAuth.callbackUrl,
-    scope: "read:user read:org public_repo",
+    scope: "read:user read:org public_repo user:email",
     state,
   });
   return c.redirect(`https://github.com/login/oauth/authorize?${params}`);
@@ -42,10 +43,17 @@ authRouter.get("/github/callback", async (c) => {
 
   const token = await exchangeCodeForToken(code, cfg);
   const ghUser = await fetchGithubUser(token);
+  let email: string | null = null;
+  try {
+    email = await fetchGithubPrimaryEmail(token);
+  } catch {
+    email = null;
+  }
   await storage.upsertIdentity({
     userId: ghUser.id,
     login: ghUser.login,
     avatarUrl: ghUser.avatar_url,
+    email,
   });
   const { rawId, expiresAt } = await storage.createSession({
     githubUserId: ghUser.id,

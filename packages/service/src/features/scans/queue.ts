@@ -62,6 +62,8 @@ export function isNoScanValueFailure(
 /** Mark job completed with zero findings (empty public result). */
 async function markCompletedEmpty(jobId: string, projectId: string, reason: string): Promise<void> {
   const db = getDb();
+  const { emptySeverityCounts } = await import("@openvuln/shared");
+  const { notificationStorage } = await import("../notifications/index.js");
   await db.begin(async (tx) => {
     await storage.updateFindingsSoFar(jobId, 0, tx);
     await storage.setCurrentScanJob(projectId, jobId, tx);
@@ -71,6 +73,12 @@ async function markCompletedEmpty(jobId: string, projectId: string, reason: stri
       SET fail_reason_internal = ${reason.slice(0, 2000)}
       WHERE id = ${jobId}::uuid
     `;
+    await notificationStorage.insertScanCompleted(tx, {
+      jobId,
+      projectId,
+      counts: emptySeverityCounts(),
+      noValue: true,
+    });
   });
 }
 
@@ -698,6 +706,23 @@ async function syncCompletedFindings(
     await storage.updateFindingsSoFar(scanJobId, publicCount, tx);
     await storage.setCurrentScanJob(projectId, scanJobId, tx);
     await storage.markCompleted(scanJobId, tx);
+
+    // Notify submitter (same txn); skip if submitted_by NULL
+    // Count from prepared rows — severityCounts() would miss uncommitted inserts.
+    const { emptySeverityCounts } = await import("@openvuln/shared");
+    const counts = emptySeverityCounts();
+    for (const row of prepared) {
+      if (row.severity === "critical" || row.severity === "high" || row.severity === "medium" || row.severity === "low") {
+        counts[row.severity] += 1;
+      }
+    }
+    const { notificationStorage } = await import("../notifications/index.js");
+    await notificationStorage.insertScanCompleted(tx, {
+      jobId: scanJobId,
+      projectId,
+      counts,
+      noValue: publicCount === 0,
+    });
   });
 
   // Phase C: harvest poc/exp text (best-effort, after findings committed).

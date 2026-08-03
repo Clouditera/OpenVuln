@@ -13,14 +13,19 @@ export async function upsertIdentity(input: {
   userId: number;
   login: string;
   avatarUrl: string | null;
+  email?: string | null;
 }): Promise<void> {
   const db = getDb();
   await db`
-    INSERT INTO github_identities (user_id, login, avatar_url, first_seen_at, last_seen_at)
-    VALUES (${input.userId}, ${input.login}, ${input.avatarUrl}, now(), now())
+    INSERT INTO github_identities (user_id, login, avatar_url, email, first_seen_at, last_seen_at)
+    VALUES (
+      ${input.userId}, ${input.login}, ${input.avatarUrl}, ${input.email ?? null},
+      now(), now()
+    )
     ON CONFLICT (user_id) DO UPDATE SET
       login = EXCLUDED.login,
       avatar_url = EXCLUDED.avatar_url,
+      email = COALESCE(EXCLUDED.email, github_identities.email),
       last_seen_at = now()
   `;
 }

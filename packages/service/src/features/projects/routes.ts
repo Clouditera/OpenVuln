@@ -10,6 +10,18 @@ import * as storage from "./storage.js";
 
 export const projectsRouter = new Hono();
 
+// GET /api/projects/mine — submitter's projects (requireAuth)
+projectsRouter.get("/mine", requireAuth, async (c) => {
+  const user = c.get("user");
+  if (!user) throw new AppError("ERR_UNAUTHORIZED", { reason: "login_required" });
+  const rows = await storage.listBySubmitter(user.githubUserId);
+  const cards = [];
+  for (const p of rows) {
+    cards.push(await service.projectToCard(p));
+  }
+  return c.json({ projects: cards });
+});
+
 // GET /api/projects?sort=newest|stars&page=
 projectsRouter.get("/", async (c) => {
   const sort = c.req.query("sort") ?? "newest";
