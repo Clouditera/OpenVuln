@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Github } from "lucide-react";
+import { AuthButton } from "./AuthButton";
 
 const VH_GITHUB = "https://github.com/search?q=vulnhunter&type=repositories";
 /** OpenVuln public repo; override at build time via VITE_GITHUB_REPO_URL. */
@@ -24,6 +25,7 @@ export function Layout() {
           </div>
 
           <div className="flex items-center gap-2">
+            <AuthButton appearance="light" />
             <a
               href={OWN_REPO}
               target="_blank"

@@ -19,13 +19,15 @@ import { SeverityBar } from "../../components/SeverityBar";
 import { SeverityChip } from "../../components/SeverityChip";
 import { ScanningSpinner, StatusBadge } from "../../components/StatusBadge";
 import { api, apiUrl } from "../../shared/api/client";
+import { useMe } from "../auth/useAuth";
+import { OwnerFindings } from "./OwnerFindings";
 import { formatDate, formatStars, shortSha, totalFindings } from "../../shared/lib/format";
 
 export function ProjectPage() {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const { owner = "", repo = "" } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") === "details" ? "details" : "overview";
+  const tabParam = params.get("tab");
   const location = useLocation();
   const justSubmitted = Boolean(
     (location.state as { justSubmitted?: boolean } | null)?.justSubmitted,
@@ -43,6 +45,18 @@ export function ProjectPage() {
   });
 
   const project = projectQ.data;
+  const meQ = useMe();
+  // owner 探测：登录后尝试拉取全量 findings；200=有权限（显示 Manage findings tab），401/403=公众视图
+  const ownerQ = useQuery({
+    queryKey: ["owner-findings", project?.id],
+    queryFn: () => api.ownerFindings(project!.id),
+    enabled: Boolean(project?.id) && meQ.data?.authenticated === true,
+    retry: false,
+    staleTime: 30_000,
+  });
+  const isOwner = ownerQ.isSuccess;
+  const tab =
+    tabParam === "details" ? "details" : tabParam === "findings" && isOwner ? "findings" : "overview";
   const cweMax = useMemo(() => {
     const list = project?.cwe_distribution ?? [];
     return Math.max(1, ...list.map((c) => c.count));
@@ -149,6 +163,11 @@ export function ProjectPage() {
         <TabButton active={tab === "details"} onClick={() => setParams({ tab: "details" })}>
           Details
         </TabButton>
+        {isOwner && (
+          <TabButton active={tab === "findings"} onClick={() => setParams({ tab: "findings" })}>
+            Manage findings
+          </TabButton>
+        )}
       </div>
 
       {tab === "overview" && (
@@ -407,6 +426,12 @@ export function ProjectPage() {
               );
             })
           )}
+        </div>
+      )}
+
+      {tab === "findings" && isOwner && (
+        <div className="py-6">
+          <OwnerFindings projectId={project.id} findings={ownerQ.data?.findings ?? []} />
         </div>
       )}
     </div>

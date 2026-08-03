@@ -1,7 +1,9 @@
 import type {
+  DisclosureState,
   OverviewStats,
   ProjectListResponse,
   ProjectPublicView,
+  Severity,
   SubmitProjectRequest,
   SubmitProjectResponse,
 } from "@openvuln/shared";
@@ -63,6 +65,55 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+
+/* ── Auth + owner self-service (design: docs/auth-owner-selfservice-design.md) ── */
+
+export interface MeResponse {
+  authenticated: boolean;
+  user: { id: number; login: string; avatar_url: string | null } | null;
+}
+
+/** GitHub OAuth 登录跳转（full-page redirect）。returnTo 必须站内路径。 */
+export function loginUrl(returnTo: string): string {
+  const safe = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
+  return apiUrl(`/api/auth/github/login?return_to=${encodeURIComponent(safe)}`);
+}
+
+export interface OwnerFindingSummary {
+  id: string;
+  finding_key: string;
+  severity: Severity;
+  title: string;
+  cwe: string | null;
+  primary_file: string | null;
+  disclosure_state: DisclosureState;
+  detail_json: unknown;
+  report_yaml: string | null;
+  cvss_score: number | null;
+  poc_status: string | null;
+}
+
+export interface OwnerArtifact {
+  kind: string;
+  rel_path: string;
+  file_name: string;
+  mime: string | null;
+  size_bytes: number;
+  truncated: boolean;
+  is_binary: boolean;
+  has_content: boolean;
+}
+
+export interface OwnerFindingDetail extends OwnerFindingSummary {
+  report: {
+    metadata?: Record<string, unknown>;
+    description?: Record<string, unknown>;
+    code?: Record<string, unknown>;
+    references?: unknown;
+  } | null;
+  artifacts: OwnerArtifact[];
+}
+
 export const api = {
   overview: () => request<OverviewStats>("/api/stats/overview"),
   listProjects: (params?: { sort?: string; page?: number; page_size?: number }) => {
@@ -81,5 +132,20 @@ export const api = {
     request<SubmitProjectResponse>("/api/projects", {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+  me: () => request<MeResponse>("/api/me"),
+  logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+  ownerFindings: (projectId: string) =>
+    request<{ project_id: string; findings: OwnerFindingSummary[] }>(
+      `/api/projects/${projectId}/findings`,
+    ),
+  ownerFinding: (projectId: string, key: string) =>
+    request<{ finding: OwnerFindingDetail }>(
+      `/api/projects/${projectId}/findings/${encodeURIComponent(key)}`,
+    ),
+  ownerDisclose: (projectId: string, findingIds: string[]) =>
+    request<{ disclosed_count: number }>(`/api/projects/${projectId}/disclose`, {
+      method: "POST",
+      body: JSON.stringify({ finding_ids: findingIds }),
     }),
 };

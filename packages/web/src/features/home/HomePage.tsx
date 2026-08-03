@@ -1,4 +1,5 @@
 import { Github } from "lucide-react";
+import { AuthButton } from "../../components/AuthButton";
 import { RepoSubmitForm } from "../../components/RepoSubmitForm";
 import { ScanDurationNotice } from "../../components/ScanDurationNotice";
 
@@ -9,7 +10,8 @@ export function HomePage() {
     <main className="openvuln-home relative isolate flex min-h-screen overflow-hidden bg-black text-white">
       <div className="openvuln-glow pointer-events-none absolute inset-0 -z-10" />
 
-      <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-end px-5 py-5 sm:px-8 sm:py-7">
+      <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-end gap-2 px-5 py-5 sm:px-8 sm:py-7">
+        <AuthButton appearance="dark" />
         <a
           href="https://github.com/Clouditera/OpenVuln"
           target="_blank"

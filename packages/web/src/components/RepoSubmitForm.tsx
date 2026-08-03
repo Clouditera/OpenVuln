@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowUp, CircleAlert, Github, LoaderCircle } from "lucide-react";
-import { ApiError, api } from "../shared/api/client";
+import { ApiError, api, loginUrl } from "../shared/api/client";
+import { useMe } from "../features/auth/useAuth";
 import { Button } from "./Button";
 
 function mapError(err: unknown): string {
@@ -10,6 +11,15 @@ function mapError(err: unknown): string {
   }
   const reason = String(err.context?.reason ?? "");
   const message = String(err.context?.message ?? "");
+  if (err.status === 401) {
+    return "Please sign in with GitHub to submit a repository.";
+  }
+  if (err.status === 403) {
+    return (
+      message ||
+      "Only accounts with admin or maintain permission on this repository can submit it."
+    );
+  }
   if (reason === "invalid_github_url") {
     return "That doesn't look like a GitHub repository URL. Expected: https://github.com/owner/repo";
   }
@@ -42,6 +52,7 @@ export function RepoSubmitForm({
   className?: string;
 }) {
   const nav = useNavigate();
+  const meQ = useMe();
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -55,6 +66,13 @@ export function RepoSubmitForm({
     const git_url = url.trim();
     if (!git_url) {
       setError("Please paste a GitHub repository URL.");
+      return;
+    }
+    // 未登录 → 整页跳 GitHub OAuth，登录后回到当前页
+    if (meQ.data && !meQ.data.authenticated) {
+      window.location.assign(
+        loginUrl(window.location.pathname + window.location.search),
+      );
       return;
     }
     setPending(true);
@@ -123,7 +141,7 @@ export function RepoSubmitForm({
           ) : pending ? (
             <span className="text-[#b9bfd2]" role="status">Submitting repository…</span>
           ) : (
-            <span>Public repositories only · No sign-in required</span>
+            <span>Public repositories · Repository maintainers only</span>
           )}
         </div>
       </form>
