@@ -1,3 +1,5 @@
+# DEPRECATED for production split deploy — use deploy/compose.prod.yml + deploy/api|web Dockerfiles.
+# Kept for legacy HF all-in-one / local experiments only.
 # syntax=docker/dockerfile:1
 
 # Build the workspace and assemble the SPA into the Hono service.

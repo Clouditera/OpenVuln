@@ -408,3 +408,50 @@ VITE_LANDING=product pnpm --filter @openvuln/web build
 See `packages/web/.env.example`. Do not commit `.env` / `.env.local` with secrets.
 
 Product UI archive: branch `archive/product-ui`, tag `v0.1.0-product`.
+
+
+## Split compose (api / web / postgres)
+
+Preferred production topology on VulnAgent (task-63d1ccf8). **MinIO is not used** by the app.
+
+### Build images (laptop or server)
+
+```bash
+# from monorepo root
+docker build -f deploy/api/Dockerfile -t openvuln:api .
+docker build -f deploy/web/Dockerfile -t openvuln:web .
+# optional HF cross-origin SPA:
+# docker build -f deploy/web/Dockerfile --build-arg VITE_API_BASE_URL=https://openvuln.clouditera.com -t openvuln:web .
+```
+
+Load onto VulnAgent if built elsewhere:
+
+```bash
+docker save openvuln:api openvuln:web | gzip | ssh VulnAgent 'gunzip | docker load'
+```
+
+### Run
+
+```bash
+mkdir -p ~/openvuln-split && cd ~/openvuln-split
+# copy compose.prod.yml + .env.prod.example from repo
+cp .env.prod.example .env.prod   # fill secrets
+docker compose -f compose.prod.yml --env-file .env.prod up -d
+curl -sS http://127.0.0.1:23100/health
+```
+
+Host nginx keeps TLS for `openvuln.clouditera.com` and `proxy_pass http://127.0.0.1:23100`.
+
+### Migrate from all-in-one (zero data loss)
+
+1. `docker exec openvuln-api pg_dump -U openvuln openvuln | gzip > ov-backup-$(date +%F).sql.gz`
+2. `docker compose -f compose.prod.yml --env-file .env.prod up -d postgres`
+3. `zcat ov-backup-*.sql.gz | docker exec -i openvuln-pg psql -U openvuln openvuln`
+4. Verify: `SELECT count(*) FROM findings;` (expect redis findings etc.)
+5. `docker compose ... up -d` (api runs migrations no-op if current)
+6. Confirm `curl http://127.0.0.1:23100/health` and project APIs
+7. Stop old all-in-one but **do not remove** for 7 days (rollback = start old container + point nginx back if needed)
+
+### Deprecated
+
+Root `Dockerfile` + `deploy/space-entrypoint.sh` (HF all-in-one with embedded PG/MinIO) remain for legacy/HF Docker experiments only. Prefer `deploy/compose.prod.yml`.
