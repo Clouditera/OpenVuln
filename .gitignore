@@ -12,8 +12,6 @@ packages/service/public/
 .env
 .env.*
 !.env.example
-!.env.hf
-!packages/web/.env.hf
 *.pem
 *.key
 id_rsa*
