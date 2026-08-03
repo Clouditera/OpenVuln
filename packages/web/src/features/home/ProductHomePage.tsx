@@ -191,7 +191,7 @@ export function ProductHomePage() {
                     <HeroStats stats={overview.data} />
                   </div>
                 )}
-                <div className="mt-8 w-full max-w-3xl text-left">
+                <div className="mt-14 w-full max-w-3xl text-left">
                   <EventTicker events={overview.data?.recent} />
                 </div>
               </div>
