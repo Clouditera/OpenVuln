@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { Github } from "lucide-react";
 import { AuthButton } from "./AuthButton";
 
-const VH_GITHUB = "https://github.com/search?q=vulnhunter&type=repositories";
+const VH_HOME = "https://vulnhunt.clouditera.com";
 /** OpenVuln public repo; override at build time via VITE_GITHUB_REPO_URL. */
 const OWN_REPO =
   (import.meta.env.VITE_GITHUB_REPO_URL as string | undefined) ||
@@ -49,7 +49,7 @@ export function Layout() {
           <p>
             © 2026 OpenVuln · Powered by{" "}
             <a
-              href={VH_GITHUB}
+              href={VH_HOME}
               target="_blank"
               rel="noreferrer"
               className="font-medium text-ink hover:text-accent-600"

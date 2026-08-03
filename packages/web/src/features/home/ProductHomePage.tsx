@@ -290,7 +290,7 @@ export function ProductHomePage() {
                     <p>
                       © 2026 OpenVuln · Powered by{" "}
                       <a
-                        href="https://github.com/search?q=vulnhunter&type=repositories"
+                        href="https://vulnhunt.clouditera.com"
                         target="_blank"
                         rel="noreferrer"
                         className="font-medium text-ink hover:text-accent-600"
