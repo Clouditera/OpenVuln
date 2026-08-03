@@ -3,10 +3,20 @@
 @tailwind utilities;
 
 @layer base {
+  /* 深色体系：原生控件（select 弹层/滚动条/checkbox）跟随深色 */
+  :root {
+    color-scheme: dark;
+  }
+
   html,
   body,
   #root {
     min-height: 100%;
+  }
+
+  select option {
+    background-color: #111216;
+    color: #f0f2f6;
   }
 
   body {
