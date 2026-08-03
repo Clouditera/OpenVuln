@@ -1,25 +1,8 @@
-import { Github, LockKeyhole, Radar, ShieldCheck } from "lucide-react";
+import { Github } from "lucide-react";
 import { RepoSubmitForm } from "../../components/RepoSubmitForm";
+import { ScanDurationNotice } from "../../components/ScanDurationNotice";
 
 const ZAI_HF_AVATAR = "https://huggingface.co/api/avatars/zai-org";
-
-const trustSignals = [
-  {
-    icon: Radar,
-    label: "AI-powered analysis",
-    detail: "Continuous security research",
-  },
-  {
-    icon: LockKeyhole,
-    label: "Private by default",
-    detail: "Findings stay encrypted",
-  },
-  {
-    icon: ShieldCheck,
-    label: "Maintainer first",
-    detail: "Responsible disclosure",
-  },
-];
 
 export function HomePage() {
   return (
@@ -68,22 +51,7 @@ export function HomePage() {
           />
         </div>
 
-        <div className="grid w-full max-w-3xl grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
-          {trustSignals.map(({ icon: Icon, label, detail }) => (
-            <div
-              key={label}
-              className="flex items-center gap-3 rounded-2xl border border-[#24252a] bg-[#151619] px-4 py-3.5 text-left transition hover:border-[#383a43] hover:bg-[#191a1f]"
-            >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#292a30] bg-[#1d1e23] text-[#aeb0ba]">
-                <Icon size={16} strokeWidth={1.8} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-[#f0f2f6]">{label}</p>
-                <p className="mt-0.5 truncate text-[11px] text-[#77787e]">{detail}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+        <ScanDurationNotice className="w-full max-w-3xl" />
       </section>
     </main>
   );

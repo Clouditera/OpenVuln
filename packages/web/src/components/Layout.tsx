@@ -12,7 +12,7 @@ export function Layout() {
   const isDeck = pathname === "/";
   return (
     <div className="flex min-h-screen flex-col">
-      {!isDeck && <header className="sticky top-0 z-30 h-14 border-b border-line bg-surface-header/95 backdrop-blur">
+      {!isDeck && <header className="app-shell-chrome sticky top-0 z-30 h-14 border-b border-line bg-surface-header/95 backdrop-blur">
         <div className="flex h-full items-center justify-between gap-4 px-5">
           <div className="flex items-center">
             <Link
@@ -42,7 +42,7 @@ export function Layout() {
       </main>
 
       {!isDeck && (
-      <footer className="mt-auto border-t border-line">
+      <footer className="app-shell-chrome mt-auto border-t border-line">
         <div className="flex flex-col gap-2 px-5 py-6 text-[13px] text-ink-secondary sm:flex-row sm:items-center sm:justify-between">
           <p>
             © 2026 OpenVuln · Powered by{" "}

@@ -1,20 +1,24 @@
-import { useMemo, useState } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowUpRight, ChevronDown, ExternalLink, Download } from "lucide-react";
-import { api, apiUrl } from "../../shared/api/client";
 import {
-  formatDate,
-  formatStars,
-  shortSha,
-  totalFindings,
-} from "../../shared/lib/format";
+  ArrowLeft,
+  ArrowUpRight,
+  ChevronDown,
+  Download,
+  ExternalLink,
+  Github,
+  LoaderCircle,
+  Shield,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { EmptyState } from "../../components/EmptyState";
+import { ReportBody } from "../../components/ReportBody";
+import { ScanDurationNotice } from "../../components/ScanDurationNotice";
 import { SeverityBar } from "../../components/SeverityBar";
 import { SeverityChip } from "../../components/SeverityChip";
-import { ReportBody } from "../../components/ReportBody";
-import { StatusBadge, ScanningSpinner } from "../../components/StatusBadge";
-import { EmptyState } from "../../components/EmptyState";
-import { Shield } from "lucide-react";
+import { ScanningSpinner, StatusBadge } from "../../components/StatusBadge";
+import { api, apiUrl } from "../../shared/api/client";
+import { formatDate, formatStars, shortSha, totalFindings } from "../../shared/lib/format";
 
 export function ProjectPage() {
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -44,11 +48,7 @@ export function ProjectPage() {
   }, [project]);
 
   if (projectQ.isLoading) {
-    return (
-      <div className="mx-auto max-w-6xl px-6 py-16">
-        <ScanningSpinner label="Loading project…" />
-      </div>
-    );
+    return <ScanProgressPage owner={owner} repo={repo} state="loading" />;
   }
 
   if (projectQ.isError || !project) {
@@ -72,6 +72,20 @@ export function ProjectPage() {
   const scanning = state === "scanning" || state === "dispatching";
   const soFar = project.latest_scan?.findings_so_far ?? 0;
   const findingsTotal = totalFindings(project.severity_counts);
+
+  if (state === "queued" || scanning) {
+    return (
+      <ScanProgressPage
+        owner={project.owner_login}
+        repo={project.name}
+        htmlUrl={project.html_url}
+        branch={project.default_branch}
+        state={state}
+        findingsSoFar={soFar}
+        justSubmitted={justSubmitted}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
@@ -394,6 +408,121 @@ export function ProjectPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function ScanProgressPage({
+  owner,
+  repo,
+  htmlUrl,
+  branch,
+  state,
+  findingsSoFar = 0,
+  justSubmitted = false,
+}: {
+  owner: string;
+  repo: string;
+  htmlUrl?: string;
+  branch?: string | null;
+  state: "loading" | "queued" | "dispatching" | "scanning";
+  findingsSoFar?: number;
+  justSubmitted?: boolean;
+}) {
+  useEffect(() => {
+    document.body.classList.add("openvuln-running");
+    return () => document.body.classList.remove("openvuln-running");
+  }, []);
+
+  const queued = state === "queued";
+  const loading = state === "loading";
+  const statusLabel = loading
+    ? "Loading scan status"
+    : queued
+      ? "Waiting in scan queue"
+      : "AI security analysis in progress";
+  const detail = loading
+    ? "Retrieving the latest status…"
+    : queued
+      ? "The repository is queued and will start automatically when a scanner is available."
+      : findingsSoFar > 0
+        ? `${findingsSoFar} confirmed finding${findingsSoFar === 1 ? "" : "s"} so far. Analysis is still running.`
+        : "VulnHunter is analyzing the repository. Results will appear after the scan completes.";
+
+  return (
+    <div className="openvuln-home fixed inset-0 z-50 overflow-y-auto bg-black text-white">
+      <div className="openvuln-glow pointer-events-none absolute inset-0 -z-10" />
+
+      <header className="flex items-center justify-between px-5 py-5 sm:px-8 sm:py-7">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-2 rounded-full border border-[#333] bg-[#030303] px-3.5 py-2 text-xs font-medium text-[#acacb0] transition hover:border-[#484a58] hover:bg-[#111216] hover:text-white focus-ring-dark"
+        >
+          <ArrowLeft size={14} />
+          OpenVuln
+        </Link>
+        {htmlUrl && (
+          <a
+            href={htmlUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-full border border-[#333] bg-[#030303] px-3.5 py-2 text-xs font-medium text-[#acacb0] transition hover:border-[#484a58] hover:bg-[#111216] hover:text-white focus-ring-dark"
+          >
+            <Github size={14} />
+            GitHub
+          </a>
+        )}
+      </header>
+
+      <main className="mx-auto flex min-h-[calc(100vh-88px)] w-full max-w-4xl flex-col items-center justify-center px-5 pb-16 pt-8 text-center sm:px-8">
+        <div className="openvuln-brand flex h-16 w-16 items-center justify-center rounded-2xl border border-white/15 bg-[#151619] shadow-[0_18px_64px_rgba(0,0,0,0.5)]">
+          <LoaderCircle
+            size={28}
+            className="animate-spin text-[#c9ccd6] motion-reduce:animate-none"
+            strokeWidth={1.7}
+          />
+        </div>
+
+        <p className="mt-7 font-mono text-[11px] uppercase tracking-[0.22em] text-[#85868d]">
+          {justSubmitted ? "Repository added" : "Live scan status"}
+        </p>
+        <h1 className="openvuln-title mt-3 text-balance text-3xl font-medium leading-tight sm:text-5xl">
+          {statusLabel}
+        </h1>
+
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-sm text-[#acacb0]">
+          <span className="text-[#f0f2f6]">{owner}</span>
+          <span className="text-[#5f6067]">/</span>
+          <span className="text-[#f0f2f6]">{repo}</span>
+          {branch && (
+            <>
+              <span className="text-[#5f6067]">·</span>
+              <span className="font-mono text-xs text-[#85868d]">{branch}</span>
+            </>
+          )}
+        </div>
+
+        <div className="openvuln-composer mt-9 w-full max-w-2xl rounded-[22px] border border-[#333] bg-[#111216] px-5 py-5 text-left shadow-[0_24px_90px_rgba(0,0,0,0.52)] sm:px-6">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#aeb0ba] opacity-50 motion-reduce:animate-none" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#d5d7df]" />
+            </span>
+            <p className="text-sm font-medium text-[#f0f2f6]">{statusLabel}</p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-[#85868d]">{detail}</p>
+          <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-[#202126]">
+            <div className="h-full w-2/5 animate-pulse rounded-full bg-gradient-to-r from-[#5f6273] via-[#d0d3dc] to-[#5f6273] motion-reduce:animate-none" />
+          </div>
+          {!loading && (
+            <p className="mt-3 text-xs text-[#66676e]">
+              Status refreshes automatically every 5 seconds.
+            </p>
+          )}
+        </div>
+
+        <ScanDurationNotice className="mt-4 w-full max-w-2xl" />
+      </main>
     </div>
   );
 }

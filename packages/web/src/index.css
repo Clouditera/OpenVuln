@@ -98,3 +98,12 @@
     animation: none;
   }
 }
+
+body.openvuln-running {
+  overflow: hidden;
+  background: #000;
+}
+
+body.openvuln-running .app-shell-chrome {
+  display: none;
+}
