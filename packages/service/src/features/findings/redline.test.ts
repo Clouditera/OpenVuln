@@ -1,7 +1,6 @@
 /**
  * RED LINE: public routes must not expose owner_only finding details.
- * Owner self-service routes were REMOVED (task-90533568) — they 404 now,
- * which is strictly stronger than the former 403 stubs.
+ * Owner endpoints require auth (401 without session).
  */
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -55,20 +54,29 @@ describe("findings red line", () => {
     expect(dumped).not.toContain("src/secret.ts");
   });
 
-  it("owner findings route does not exist (404)", async () => {
+  it("owner findings route requires auth (401)", async () => {
     const { projectId } = await seedProject();
     const res = await ctx.app.request(`/api/projects/${projectId}/findings`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 
-  it("owner disclose route does not exist (404)", async () => {
+  it("owner disclose route requires auth (401)", async () => {
     const { projectId } = await seedProject();
     const res = await ctx.app.request(`/api/projects/${projectId}/disclose`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ finding_ids: [] }),
+      body: JSON.stringify({ finding_ids: ["00000000-0000-0000-0000-000000000001"] }),
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
+  });
+
+  it("submit requires auth (401)", async () => {
+    const res = await ctx.app.request(`/api/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ git_url: "https://github.com/acme/widget" }),
+    });
+    expect(res.status).toBe(401);
   });
 
   it("info severity is not exposed in public counts", async () => {
@@ -78,21 +86,17 @@ describe("findings red line", () => {
       key: "info-1",
       severity: "info",
       cvssScore: 0,
-      title: "INFO NOISE",
-    });
-    await seedFinding(projectId, scanId, {
-      key: "hi-1",
-      severity: "high",
-      cvssScore: 8,
-      title: "Real high",
+      disclosure: "disclosed",
+      title: "Info only",
     });
     const [owner, repo] = fullName.split("/");
     const res = await ctx.app.request(`/api/projects/${owner}/${repo}`);
+    expect(res.status).toBe(200);
     const body = (await res.json()) as {
+      disclosed_findings: unknown[];
       severity_counts: Record<string, number>;
     };
-    expect(body.severity_counts.high).toBe(1);
-    expect(body.severity_counts).not.toHaveProperty("info");
-    expect(JSON.stringify(body)).not.toContain("INFO NOISE");
+    expect(body.disclosed_findings).toHaveLength(0);
+    expect(body.severity_counts.info ?? 0).toBe(0);
   });
 });

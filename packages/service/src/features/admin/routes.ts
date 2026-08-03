@@ -17,7 +17,7 @@ adminRouter.use("*", requireAdminToken);
 /**
  * POST /api/admin/import — offline shelf (path B).
  * Body: { repo?, project_id?, commit_sha?, findings: [...] }
- * Encrypts with ADMIN_PUBLIC_KEY; creates completed scan_job.
+ * Plaintext import; creates completed scan_job.
  */
 adminRouter.post("/import", async (c) => {
   let body: ImportBody;
@@ -174,7 +174,7 @@ adminRouter.delete("/projects/:projectId", async (c) => {
   return c.json({ ok: true });
 });
 
-// GET /api/admin/projects/:id/report-package — ciphertext only
+// GET /api/admin/projects/:id/report-package — plaintext package (legacy path kept)
 adminRouter.get("/projects/:projectId/report-package", async (c) => {
   const projectId = c.req.param("projectId");
   if (!findingsStorage.isUuid(projectId)) {
@@ -184,12 +184,9 @@ adminRouter.get("/projects/:projectId/report-package", async (c) => {
   if (!project) throw new AppError("ERR_NOT_FOUND", { resource: "project" });
 
   const latest = await scanStorage.getLatestScanForProject(projectId);
-  const items = await findingsStorage.listEncryptedPackage(projectId);
-  // poc/exp ciphertext (OVENC1) — same sensitivity as finding detail
-  const { listEncryptedArtifactsForProject } = await import(
-    "../findings/artifacts-storage.js"
-  );
-  const artifacts = await listEncryptedArtifactsForProject(projectId);
+  const items = await findingsStorage.listAllForOwner(projectId);
+  const { listArtifactsForProject } = await import("../findings/artifacts-storage.js");
+  const artifacts = await listArtifactsForProject(projectId);
 
   const body = {
     generated_at: new Date().toISOString(),
@@ -222,12 +219,15 @@ adminRouter.get("/projects/:projectId/report-package", async (c) => {
   });
 });
 
-// POST /api/admin/projects/:id/disclose — token + RSA-PSS signature
+// Legacy signed disclose kept for migration window (optional if key present)
 adminRouter.post("/projects/:projectId/disclose", async (c) => {
   const projectId = c.req.param("projectId");
   const config = c.get("config");
   if (!config.adminPublicKeyPem) {
-    throw new AppError("ERR_INTERNAL", { reason: "admin_public_key_missing" });
+    throw new AppError("ERR_FORBIDDEN", {
+      reason: "signed_disclose_retired",
+      message: "Use owner POST /api/projects/:id/disclose or admin undisclose",
+    });
   }
 
   const sig = c.req.header("x-ov-signature") ?? "";
@@ -271,7 +271,6 @@ adminRouter.post("/projects/:projectId/disclose", async (c) => {
     throw new AppError("ERR_CONFLICT", { reason: "nonce_replay" });
   }
 
-  // Ensure project exists
   const project = await projectStorage.findById(projectId);
   if (!project) throw new AppError("ERR_NOT_FOUND", { resource: "project" });
 
@@ -304,4 +303,25 @@ adminRouter.post("/projects/:projectId/disclose", async (c) => {
   );
 
   return c.json({ disclosed_count: updated.length, finding_ids: updated });
+});
+
+/** Ops fallback: reverse accidental owner disclose (token only). */
+adminRouter.post("/findings/:findingId/undisclose", async (c) => {
+  const findingId = c.req.param("findingId");
+  if (!findingsStorage.isUuid(findingId)) {
+    throw new AppError("ERR_VALIDATION", { field: "findingId" });
+  }
+  const db = (await import("../../infra/db/index.js")).getDb();
+  const rows = await db`
+    UPDATE findings
+    SET disclosure_state = 'owner_only',
+        disclosed_at = NULL
+    WHERE id = ${findingId}::uuid
+      AND disclosure_state = 'disclosed'
+    RETURNING id::text
+  `;
+  if (rows.length === 0) {
+    throw new AppError("ERR_NOT_FOUND", { resource: "finding", reason: "not_disclosed" });
+  }
+  return c.json({ ok: true, finding_id: findingId });
 });

@@ -33,16 +33,17 @@ export async function insertProject(input: {
   language: string | null;
   stars: number;
   defaultBranch: string;
+  submittedBy?: number | null;
 }): Promise<ProjectRow> {
   const db = getDb();
   const rows = await db<ProjectRow[]>`
     INSERT INTO projects (
       github_repo_id, owner_login, name, full_name, html_url,
-      description, language, stars, default_branch
+      description, language, stars, default_branch, submitted_by
     ) VALUES (
       ${input.githubRepoId}, ${input.ownerLogin}, ${input.name}, ${input.fullName},
       ${input.htmlUrl}, ${input.description}, ${input.language}, ${input.stars},
-      ${input.defaultBranch}
+      ${input.defaultBranch}, ${input.submittedBy ?? null}
     )
     RETURNING
       id::text, github_repo_id::text, owner_login, name, full_name, html_url,

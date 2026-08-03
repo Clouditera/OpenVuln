@@ -5,11 +5,13 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { adminRouter } from "./features/admin/index.js";
+import { authRouter } from "./features/auth/index.js";
 import { projectsRouter } from "./features/projects/index.js";
 import { reportRouter } from "./features/report/index.js";
 import { statsRouter } from "./features/stats/index.js";
 import type { ServiceConfig } from "./infra/config.js";
 import { logger } from "./infra/logger.js";
+import { loadSession } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/index.js";
 
 function resolvePublicRoot(): string | null {
@@ -52,6 +54,17 @@ export function createApp(config: ServiceConfig): Hono {
   );
 
   app.get("/health", (c) => c.json({ ok: true, service: "openvuln" }));
+
+  // Session cookie → c.var.user (optional)
+  app.use("/api/*", loadSession);
+
+  app.route("/api/auth", authRouter);
+  // Design contract: GET /api/me (same handler as /api/auth/me)
+  app.get("/api/me", (c) => {
+    const url = new URL(c.req.url);
+    url.pathname = "/api/auth/me";
+    return app.fetch(new Request(url.toString(), c.req.raw));
+  });
 
   app.route("/api/stats", statsRouter);
 

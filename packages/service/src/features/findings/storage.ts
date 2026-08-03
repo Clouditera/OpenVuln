@@ -90,7 +90,11 @@ export async function upsertEncryptedFinding(
     findingKey: string;
     severity: string;
     cwe: string | null;
-    encPayload: string;
+    /** @deprecated dual-write; prefer title/detailJson */
+    encPayload?: string | null;
+    title?: string | null;
+    primaryFile?: string | null;
+    detailJson?: unknown;
     disclosureState?: DisclosureState;
     disclosedAt?: Date | null;
     disclosedTitle?: string | null;
@@ -105,10 +109,13 @@ export async function upsertEncryptedFinding(
   sql: SqlLike = getDb(),
 ): Promise<void> {
   const disclosureState = input.disclosureState ?? "owner_only";
+  const detailJson =
+    input.detailJson === undefined ? null : JSON.stringify(input.detailJson);
   await sql`
     INSERT INTO findings (
       id, project_id, scan_job_id, finding_key, severity, cwe,
-      enc_payload, disclosure_state, disclosed_at,
+      enc_payload, title, primary_file, detail_json,
+      disclosure_state, disclosed_at,
       disclosed_title, disclosed_summary, disclosed_report_yaml,
       cvss_score, cvss_vector, poc_status, item_type, vh_severity
     ) VALUES (
@@ -118,7 +125,10 @@ export async function upsertEncryptedFinding(
       ${input.findingKey},
       ${input.severity},
       ${input.cwe},
-      ${input.encPayload},
+      ${input.encPayload ?? ""},
+      ${input.title ?? null},
+      ${input.primaryFile ?? null},
+      ${detailJson}::jsonb,
       ${disclosureState},
       ${input.disclosedAt ?? null},
       ${input.disclosedTitle ?? null},
@@ -134,6 +144,9 @@ export async function upsertEncryptedFinding(
       severity = EXCLUDED.severity,
       cwe = EXCLUDED.cwe,
       enc_payload = EXCLUDED.enc_payload,
+      title = EXCLUDED.title,
+      primary_file = EXCLUDED.primary_file,
+      detail_json = EXCLUDED.detail_json,
       cvss_score = EXCLUDED.cvss_score,
       cvss_vector = EXCLUDED.cvss_vector,
       poc_status = EXCLUDED.poc_status,
@@ -216,8 +229,11 @@ export async function listDisclosedSummaries(projectId: string): Promise<
 > {
   const db = getDb();
   const rows = await db`
-    SELECT f.id::text, f.finding_key, f.severity, f.disclosed_title, f.cwe, f.disclosed_at,
-           f.disclosed_summary, f.disclosed_report_yaml
+    SELECT f.id::text, f.finding_key, f.severity,
+           COALESCE(f.disclosed_title, f.title) AS title,
+           f.cwe, f.disclosed_at,
+           f.disclosed_summary, f.disclosed_report_yaml,
+           f.detail_json, f.primary_file
     FROM findings f
     JOIN projects p ON p.id = f.project_id AND p.current_scan_job_id = f.scan_job_id
     WHERE f.project_id = ${projectId}::uuid
@@ -234,11 +250,13 @@ export async function listDisclosedSummaries(projectId: string): Promise<
     id: string;
     finding_key: string;
     severity: string;
-    disclosed_title: string | null;
+    title: string | null;
     cwe: string | null;
     disclosed_at: Date | null;
     disclosed_summary: string | null;
     disclosed_report_yaml: string | null;
+    detail_json: unknown;
+    primary_file: string | null;
   };
   return (rows as unknown as DiscRow[])
     .filter((r) => isPublicSeverity(r.severity))
@@ -246,12 +264,87 @@ export async function listDisclosedSummaries(projectId: string): Promise<
       id: r.id,
       finding_key: r.finding_key,
       severity: r.severity as Severity,
-      title: r.disclosed_title ?? r.finding_key,
+      title: r.title ?? r.finding_key,
       cwe: r.cwe,
       disclosed_at: r.disclosed_at,
       summary: r.disclosed_summary,
       report_yaml: r.disclosed_report_yaml,
+      detail_json: r.detail_json ?? null,
+      primary_file: r.primary_file,
     }));
+}
+
+/** Owner view: all findings on current scan (including owner_only). */
+export async function listAllForOwner(projectId: string): Promise<
+  Array<{
+    id: string;
+    finding_key: string;
+    severity: Severity;
+    title: string;
+    cwe: string | null;
+    primary_file: string | null;
+    disclosure_state: DisclosureState;
+    detail_json: unknown;
+    report_yaml: string | null;
+    cvss_score: number | null;
+    poc_status: string | null;
+  }>
+> {
+  const db = getDb();
+  const rows = await db`
+    SELECT f.id::text, f.finding_key, f.severity, COALESCE(f.title, f.disclosed_title, f.finding_key) AS title,
+           f.cwe, f.primary_file, f.disclosure_state, f.detail_json,
+           f.disclosed_report_yaml, f.cvss_score, f.poc_status
+    FROM findings f
+    JOIN projects p ON p.id = f.project_id AND p.current_scan_job_id = f.scan_job_id
+    WHERE f.project_id = ${projectId}::uuid
+      AND f.severity IN ('critical', 'high', 'medium', 'low')
+    ORDER BY
+      CASE f.severity
+        WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4
+      END,
+      f.finding_key
+  `;
+  return (rows as unknown as Array<Record<string, unknown>>).map((r) => ({
+    id: String(r.id),
+    finding_key: String(r.finding_key),
+    severity: r.severity as Severity,
+    title: String(r.title ?? r.finding_key),
+    cwe: (r.cwe as string) ?? null,
+    primary_file: (r.primary_file as string) ?? null,
+    disclosure_state: r.disclosure_state as DisclosureState,
+    detail_json: r.detail_json ?? null,
+    report_yaml: (r.disclosed_report_yaml as string) ?? null,
+    cvss_score: r.cvss_score != null ? Number(r.cvss_score) : null,
+    poc_status: (r.poc_status as string) ?? null,
+  }));
+}
+
+export async function ownerDiscloseFindings(
+  projectId: string,
+  findingIds: string[],
+): Promise<number> {
+  if (findingIds.length === 0) return 0;
+  const db = getDb();
+  const rows = await db`
+    UPDATE findings f
+    SET disclosure_state = 'disclosed',
+        disclosed_at = COALESCE(f.disclosed_at, now()),
+        disclosed_title = COALESCE(f.disclosed_title, f.title, f.finding_key),
+        disclosed_report_yaml = COALESCE(
+          f.disclosed_report_yaml,
+          f.detail_json->>'report_yaml',
+          f.detail_json->'detail'->>'report_yaml'
+        )
+    FROM projects p
+    WHERE f.project_id = p.id
+      AND p.id = ${projectId}::uuid
+      AND p.current_scan_job_id = f.scan_job_id
+      AND f.id = ANY(${findingIds}::uuid[])
+      AND f.disclosure_state = 'owner_only'
+    RETURNING f.id
+  `;
+  return rows.length;
 }
 
 export async function platformSeverityCounts(): Promise<SeverityCounts> {

@@ -3,7 +3,6 @@
  * as a completed scan_job without calling VulnHunter.
  */
 import { randomUUID } from "node:crypto";
-import { encryptForAdmin } from "@openvuln/shared/crypto";
 import { severityFromCvss, type SeverityStored } from "@openvuln/shared";
 import { loadConfig } from "../../infra/config.js";
 import { getDb } from "../../infra/db/index.js";
@@ -184,9 +183,6 @@ export async function importFindingsPackage(body: ImportBody): Promise<{
   skipped: number;
 }> {
   const cfg = loadConfig();
-  if (!cfg.adminPublicKeyPem) {
-    throw new Error("ADMIN_PUBLIC_KEY required for import encryption");
-  }
   if (!Array.isArray(body.findings) || body.findings.length === 0) {
     throw new Error("findings array required");
   }
@@ -296,13 +292,6 @@ export async function importFindingsPackage(body: ImportBody): Promise<{
       const pocStatus = mapImportPocStatus(f.poc_status ?? meta.poc_status);
       const prev = prior.get(f.finding_key);
 
-      const encPayload = encryptForAdmin(cfg.adminPublicKeyPem, findingId, {
-        title,
-        primary_file: primaryFile,
-        detail: { source: "offline_import", report_yaml: f.report_yaml },
-        report_yaml: f.report_yaml,
-      });
-
       await findingsStorage.upsertEncryptedFinding(
         {
           id: findingId,
@@ -311,12 +300,20 @@ export async function importFindingsPackage(body: ImportBody): Promise<{
           findingKey: f.finding_key,
           severity,
           cwe: f.cwe ?? meta.cwe,
-          encPayload,
+          title,
+          primaryFile,
+          detailJson: {
+            title,
+            primary_file: primaryFile,
+            detail: { source: "offline_import", report_yaml: f.report_yaml },
+            report_yaml: f.report_yaml,
+          },
+          encPayload: "",
           disclosureState: prev?.state,
           disclosedAt: prev?.disclosedAt ?? null,
-          disclosedTitle: prev?.disclosedTitle ?? null,
+          disclosedTitle: prev?.disclosedTitle ?? title,
           disclosedSummary: prev?.disclosedSummary ?? null,
-          disclosedReportYaml: prev?.disclosedReportYaml ?? null,
+          disclosedReportYaml: prev?.disclosedReportYaml ?? f.report_yaml,
           cvssScore: f.cvss_score ?? meta.cvss_score,
           cvssVector: f.cvss_vector ?? meta.cvss_vector,
           pocStatus,
@@ -328,9 +325,6 @@ export async function importFindingsPackage(body: ImportBody): Promise<{
 
       for (const a of f.artifacts ?? []) {
         if (!a.content || !isTextArtifactPath(a.rel_path)) continue;
-        if (a.content.length > artifactStorage.ARTIFACT_CONTENT_MAX_CHARS) {
-          // still store truncated encrypted
-        }
         let text = a.content;
         let truncated = false;
         if (text.length > artifactStorage.ARTIFACT_CONTENT_MAX_CHARS) {
@@ -338,11 +332,6 @@ export async function importFindingsPackage(body: ImportBody): Promise<{
           truncated = true;
         }
         const artifactId = randomUUID();
-        const encContent = encryptForAdmin(cfg.adminPublicKeyPem, artifactId, {
-          title: a.file_name,
-          primary_file: a.rel_path,
-          detail: { kind: a.kind, text, finding_key: f.finding_key },
-        });
         await artifactStorage.insertArtifact(
           {
             id: artifactId,
@@ -356,7 +345,8 @@ export async function importFindingsPackage(body: ImportBody): Promise<{
             fileName: a.file_name,
             mime: "text/plain",
             sizeBytes: Buffer.byteLength(a.content, "utf8"),
-            encContent,
+            encContent: null,
+            contentText: text,
             truncated,
             isBinary: false,
           },

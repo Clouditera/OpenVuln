@@ -4,7 +4,6 @@ import { getDb } from "../../infra/db/index.js";
 type SqlLike = any;
 
 export interface ArtifactInsert {
-  /** Pre-generated id — AAD for OVENC1 envelope. */
   id: string;
   findingId: string;
   projectId: string;
@@ -14,8 +13,10 @@ export interface ArtifactInsert {
   fileName: string;
   mime: string | null;
   sizeBytes: number;
-  /** OVENC1 ciphertext only — never plaintext. */
-  encContent: string | null;
+  /** @deprecated dual-write empty during plaintext migration */
+  encContent?: string | null;
+  /** Plaintext body (preferred). */
+  contentText?: string | null;
   truncated: boolean;
   isBinary: boolean;
 }
@@ -39,7 +40,7 @@ export async function insertArtifact(row: ArtifactInsert, sql: SqlLike = getDb()
   await sql`
     INSERT INTO finding_artifacts (
       id, finding_id, project_id, scan_job_id, kind, rel_path, file_name,
-      mime, size_bytes, content, truncated, is_binary
+      mime, size_bytes, content, content_text, truncated, is_binary
     ) VALUES (
       ${row.id}::uuid,
       ${row.findingId}::uuid,
@@ -50,7 +51,8 @@ export async function insertArtifact(row: ArtifactInsert, sql: SqlLike = getDb()
       ${row.fileName},
       ${row.mime},
       ${row.sizeBytes},
-      ${row.encContent},
+      ${row.encContent ?? null},
+      ${row.contentText ?? null},
       ${row.truncated},
       ${row.isBinary}
     )
@@ -59,6 +61,7 @@ export async function insertArtifact(row: ArtifactInsert, sql: SqlLike = getDb()
       mime = EXCLUDED.mime,
       size_bytes = EXCLUDED.size_bytes,
       content = EXCLUDED.content,
+      content_text = EXCLUDED.content_text,
       truncated = EXCLUDED.truncated,
       is_binary = EXCLUDED.is_binary
   `;
@@ -73,7 +76,7 @@ export async function countArtifactsForProject(projectId: string): Promise<numbe
   return Number(rows[0]?.n ?? 0);
 }
 
-/** Metadata only — never returns ciphertext body on public paths. */
+/** Metadata only for public/owner list. */
 export async function listArtifactsForFinding(findingId: string): Promise<
   Array<{
     kind: string;
@@ -83,22 +86,22 @@ export async function listArtifactsForFinding(findingId: string): Promise<
     size_bytes: number;
     truncated: boolean;
     is_binary: boolean;
-    has_enc_content: boolean;
+    has_content: boolean;
   }>
 > {
   const db = getDb();
   return db`
     SELECT
       kind, rel_path, file_name, mime, size_bytes, truncated, is_binary,
-      (content IS NOT NULL AND content LIKE 'OVENC1.%') AS has_enc_content
+      (content_text IS NOT NULL OR (content IS NOT NULL AND content <> '')) AS has_content
     FROM finding_artifacts
     WHERE finding_id = ${findingId}::uuid
     ORDER BY kind, rel_path
   `;
 }
 
-/** Admin report-package: ciphertext artifacts keyed by finding. */
-export async function listEncryptedArtifactsForProject(projectId: string): Promise<
+/** Owner/admin: plaintext artifacts keyed by finding. */
+export async function listArtifactsForProject(projectId: string): Promise<
   Array<{
     artifact_id: string;
     finding_id: string;
@@ -110,6 +113,8 @@ export async function listEncryptedArtifactsForProject(projectId: string): Promi
     size_bytes: number;
     truncated: boolean;
     is_binary: boolean;
+    content_text: string | null;
+    /** legacy ciphertext if any */
     enc_content: string | null;
   }>
 > {
@@ -126,6 +131,7 @@ export async function listEncryptedArtifactsForProject(projectId: string): Promi
       a.size_bytes,
       a.truncated,
       a.is_binary,
+      a.content_text,
       a.content AS enc_content
     FROM finding_artifacts a
     JOIN findings f ON f.id = a.finding_id
@@ -135,3 +141,6 @@ export async function listEncryptedArtifactsForProject(projectId: string): Promi
     ORDER BY f.finding_key, a.kind, a.rel_path
   `;
 }
+
+/** @deprecated alias during migration */
+export const listEncryptedArtifactsForProject = listArtifactsForProject;

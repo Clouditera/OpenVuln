@@ -11,7 +11,7 @@ describe("artifact harvest on completed sync", () => {
     await cleanTables();
   });
 
-  it("stores mock poc/exp text for confirmed findings", async () => {
+  it("stores mock poc/exp text as plaintext for confirmed findings", async () => {
     const { projectId } = await seedProject({ fullName: "acme/art-harvest" });
     const jobId = crypto.randomUUID();
     await ctx.db`
@@ -29,7 +29,6 @@ describe("artifact harvest on completed sync", () => {
       UPDATE scan_jobs SET vulnhunter_task_id = ${taskId}::uuid WHERE id = ${jobId}::uuid
     `;
 
-    // Drive completed path via pollOnce
     await scanQueueInternal.pollOnce(3);
 
     const n = await countArtifactsForProject(projectId);
@@ -37,28 +36,35 @@ describe("artifact harvest on completed sync", () => {
     expect(n).toBeGreaterThanOrEqual(3);
 
     const rows = await ctx.db<
-      { kind: string; file_name: string; content: string | null; is_binary: boolean }[]
+      {
+        kind: string;
+        file_name: string;
+        content: string | null;
+        content_text: string | null;
+        is_binary: boolean;
+      }[]
     >`
-      SELECT kind, file_name, content, is_binary FROM finding_artifacts
+      SELECT kind, file_name, content, content_text, is_binary FROM finding_artifacts
       WHERE project_id = ${projectId}::uuid
       ORDER BY kind, file_name
     `;
     const pocs = rows.filter((r) => r.kind === "poc");
     expect(pocs.length).toBeGreaterThanOrEqual(2);
-    // Text stored as OVENC1 — never plaintext
-    expect(pocs.every((r) => r.content && r.content.startsWith("OVENC1."))).toBe(true);
-    expect(pocs.every((r) => r.content && !r.content.includes("PoC for"))).toBe(true);
+    // Plaintext in content_text
+    expect(pocs.every((r) => r.content_text && r.content_text.includes("PoC for"))).toBe(true);
+    expect(pocs.every((r) => !r.content || !r.content.startsWith("OVENC1."))).toBe(true);
     expect(rows.some((r) => r.kind === "exp" && r.file_name === "exp.py")).toBe(true);
 
-    // report-package includes artifacts ciphertext
     const pkg = await ctx.app.request(`/api/admin/projects/${projectId}/report-package`, {
       headers: { authorization: "Bearer test-admin-token" },
     });
     expect(pkg.status).toBe(200);
-    const body = (await pkg.json()) as { artifacts: Array<{ enc_content: string | null }> };
+    const body = (await pkg.json()) as {
+      artifacts: Array<{ content_text: string | null; enc_content: string | null }>;
+    };
     expect(body.artifacts.length).toBeGreaterThanOrEqual(3);
     expect(
-      body.artifacts.filter((a) => a.enc_content?.startsWith("OVENC1.")).length,
+      body.artifacts.filter((a) => a.content_text && a.content_text.length > 0).length,
     ).toBeGreaterThanOrEqual(3);
   });
 });

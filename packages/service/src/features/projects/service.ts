@@ -7,7 +7,10 @@ import type {
 } from "@openvuln/shared";
 import { emptySeverityCounts } from "@openvuln/shared";
 import type { ServiceConfig } from "../../infra/config.js";
+import type { AuthUser } from "../../middleware/auth.js";
 import { AppError } from "../../middleware/error-handler.js";
+import { requireRepoAccess } from "../auth/permission.js";
+import { authStorage } from "../auth/index.js";
 import { findingsStorage } from "../findings/index.js";
 import { parseReportYaml } from "../report/yaml-render.js";
 import { type ScanJobRow, scanStorage } from "../scans/index.js";
@@ -138,6 +141,7 @@ export async function getPublicView(owner: string, repo: string): Promise<Projec
 export async function submitProject(
   gitUrl: string,
   config: ServiceConfig,
+  user: AuthUser,
 ): Promise<SubmitProjectResponse> {
   const parsed = parseGitHubUrl(gitUrl);
   if (!parsed) {
@@ -164,6 +168,17 @@ export async function submitProject(
 
   // If user submitted a fork, we register the upstream root (already resolved)
   void wasFork;
+
+  // Maintainer/admin only + daily rate limit
+  await requireRepoAccess(user, meta.owner.login, meta.name, meta.id, config);
+  const submitCount = await authStorage.bumpSubmitCount(user.githubUserId);
+  if (submitCount > config.submitDailyLimit) {
+    throw new AppError("ERR_CONFLICT", {
+      reason: "submit_rate_limit",
+      limit: config.submitDailyLimit,
+      message: `Daily submit limit of ${config.submitDailyLimit} reached.`,
+    });
+  }
 
   const existing = await storage.findByRepoId(meta.id);
   if (existing) {
@@ -205,6 +220,7 @@ export async function submitProject(
       language: meta.language,
       stars: meta.stargazers_count ?? 0,
       defaultBranch: meta.default_branch,
+      submittedBy: user.githubUserId,
     });
   } catch (err) {
     // BUG-2: concurrent submit races past findByRepoId → unique_violation.

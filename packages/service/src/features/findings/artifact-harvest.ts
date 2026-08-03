@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { encryptForAdmin } from "@openvuln/shared/crypto";
 import { logger } from "../../infra/logger.js";
-import { loadConfig } from "../../infra/config.js";
 import type { VhArtifactFileEntry } from "../vulnhunter/client.js";
 import { getVulnHunterClient } from "../vulnhunter/index.js";
 import {
@@ -34,11 +32,6 @@ export async function harvestFindingArtifacts(opts: {
   sql?: SqlLike;
 }): Promise<{ files: number; truncated: number; errors: number }> {
   const vh = getVulnHunterClient();
-  const cfg = loadConfig();
-  if (!cfg.adminPublicKeyPem) {
-    logger.warn("ADMIN_PUBLIC_KEY missing — skip artifact harvest (cannot encrypt)");
-    return { files: 0, truncated: 0, errors: 1 };
-  }
   const sql = opts.sql;
   let files = 0;
   let truncated = 0;
@@ -104,16 +97,6 @@ export async function harvestFindingArtifacts(opts: {
           if (wasTruncated) truncated += 1;
 
           const artifactId = randomUUID();
-          let encContent: string | null = null;
-          if (content != null) {
-            // AAD = artifact id (same pattern as findings); body is { text, path, kind }
-            encContent = encryptForAdmin(cfg.adminPublicKeyPem, artifactId, {
-              title: fileName,
-              primary_file: treePath,
-              detail: { kind, text: content, finding_key: f.findingKey },
-            });
-          }
-
           await insertArtifact(
             {
               id: artifactId,
@@ -125,7 +108,8 @@ export async function harvestFindingArtifacts(opts: {
               fileName,
               mime,
               sizeBytes,
-              encContent,
+              encContent: null,
+              contentText: content,
               truncated: wasTruncated,
               isBinary,
             },

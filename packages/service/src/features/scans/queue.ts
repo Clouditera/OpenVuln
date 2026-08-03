@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { type SeverityStored, isIngestiblePocStatus, severityFromCvss } from "@openvuln/shared";
-import { encryptForAdmin } from "@openvuln/shared/crypto";
 import type { ServiceConfig } from "../../infra/config.js";
 import { loadConfig } from "../../infra/config.js";
 import { getDb } from "../../infra/db/index.js";
@@ -523,7 +522,10 @@ interface PreparedFindingRow {
   findingKey: string;
   severity: SeverityStored;
   cwe: string | null;
-  encPayload: string;
+  title: string;
+  primaryFile: string | null;
+  detailJson: unknown;
+  reportYaml: string | null;
   cvssScore: number | null;
   cvssVector: string | null;
   pocStatus: string;
@@ -533,7 +535,7 @@ interface PreparedFindingRow {
 
 /**
  * completed path:
- *  A) slow IO outside txn — list + detail + encrypt into memory
+ *  A) slow IO outside txn — list + detail into memory (plaintext)
  *  B) single txn — disclosure snapshot, delete, insert, flip pointer, markCompleted
  */
 async function syncCompletedFindings(
@@ -542,10 +544,7 @@ async function syncCompletedFindings(
   vhTaskId: string,
 ): Promise<number> {
   const vh = getVulnHunterClient();
-  const cfg = loadConfig();
-  if (!cfg.adminPublicKeyPem) {
-    throw new Error("ADMIN_PUBLIC_KEY required to encrypt findings");
-  }
+  loadConfig();
 
   const metas = await vh.listFindings(vhTaskId);
   const prepared: PreparedFindingRow[] = [];
@@ -600,19 +599,20 @@ async function syncCompletedFindings(
     }
 
     const findingId = randomUUID();
-    const encPayload = encryptForAdmin(cfg.adminPublicKeyPem, findingId, {
-      title,
-      primary_file: primaryFile,
-      detail: detail ?? meta,
-      report_yaml: reportYaml,
-    });
-
     prepared.push({
       id: findingId,
       findingKey: meta.key,
       severity: mapped.severity,
       cwe,
-      encPayload,
+      title,
+      primaryFile,
+      detailJson: {
+        title,
+        primary_file: primaryFile,
+        detail: detail ?? meta,
+        report_yaml: reportYaml,
+      },
+      reportYaml,
       cvssScore: mapped.cvssScore,
       cvssVector: mapped.cvssVector,
       pocStatus,
@@ -660,12 +660,15 @@ async function syncCompletedFindings(
           findingKey: row.findingKey,
           severity: row.severity,
           cwe: row.cwe,
-          encPayload: row.encPayload,
+          title: row.title,
+          primaryFile: row.primaryFile,
+          detailJson: row.detailJson,
+          encPayload: "",
           disclosureState: prev?.state,
           disclosedAt: prev?.disclosedAt ?? null,
-          disclosedTitle: prev?.disclosedTitle ?? null,
+          disclosedTitle: prev?.disclosedTitle ?? row.title,
           disclosedSummary: prev?.disclosedSummary ?? null,
-          disclosedReportYaml: prev?.disclosedReportYaml ?? null,
+          disclosedReportYaml: prev?.disclosedReportYaml ?? row.reportYaml,
           cvssScore: row.cvssScore,
           cvssVector: row.cvssVector,
           pocStatus: row.pocStatus,

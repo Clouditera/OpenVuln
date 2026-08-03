@@ -39,6 +39,14 @@ export interface ServiceConfig {
     zipDownloadTimeoutMs: number;
   };
   github: { serverToken: string };
+  githubOAuth: {
+    clientId: string;
+    clientSecret: string;
+    callbackUrl: string;
+    /** HMAC secret for OAuth state (defaults to client secret). */
+    stateSecret: string;
+  };
+  submitDailyLimit: number;
   scan: {
     concurrency: number;
     cooldownDays: number;
@@ -64,9 +72,14 @@ export function loadConfig(): ServiceConfig {
   let adminPublicKeyPem = "";
   if (adminKeyRaw) {
     adminPublicKeyPem = decodePublicKeyEnv(adminKeyRaw);
-  } else if (process.env.NODE_ENV === "production") {
-    throw new Error("ADMIN_PUBLIC_KEY is required in production");
   }
+  // ADMIN_PUBLIC_KEY optional after plaintext migration (legacy decrypt only)
+  const oauthClientId = optionalEnv("GITHUB_CLIENT_ID", "");
+  const oauthClientSecret = optionalEnv("GITHUB_CLIENT_SECRET", "");
+  const publicBaseUrl = optionalEnv("PUBLIC_BASE_URL", "http://localhost:7860");
+  const oauthCallback =
+    optionalEnv("GITHUB_OAUTH_CALLBACK_URL", "") ||
+    `${publicBaseUrl.replace(/\/$/, "")}/api/auth/github/callback`;
   const corsRaw = optionalEnv("CORS_ALLOWED_ORIGINS", "");
   const corsAllowedOrigins = corsRaw
     .split(",")
@@ -77,7 +90,7 @@ export function loadConfig(): ServiceConfig {
 
   return {
     port: Number(optionalEnv("PORT", "7860")),
-    publicBaseUrl: optionalEnv("PUBLIC_BASE_URL", "http://localhost:7860"),
+    publicBaseUrl,
     corsAllowedOrigins,
     db: {
       url: optionalEnv("DATABASE_URL", "postgresql://openvuln:openvuln@localhost:5432/openvuln"),
@@ -104,6 +117,13 @@ export function loadConfig(): ServiceConfig {
     github: {
       serverToken: optionalEnv("GITHUB_SERVER_TOKEN", ""),
     },
+    githubOAuth: {
+      clientId: oauthClientId,
+      clientSecret: oauthClientSecret,
+      callbackUrl: oauthCallback,
+      stateSecret: optionalEnv("GITHUB_OAUTH_STATE_SECRET", "") || oauthClientSecret || "dev-oauth-state",
+    },
+    submitDailyLimit: Number(optionalEnv("SUBMIT_DAILY_LIMIT", "10")),
     scan: {
       concurrency: Number(optionalEnv("SCAN_CONCURRENCY", "4")),
       cooldownDays: Number(optionalEnv("SCAN_COOLDOWN_DAYS", "7")),

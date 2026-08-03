@@ -2,7 +2,7 @@
  * Integration test helpers. Always uses openvuln_test — never the demo DB.
  */
 import { randomUUID } from "node:crypto";
-import { encryptForAdmin, generateAdminKeyPair } from "@openvuln/shared/crypto";
+import { generateAdminKeyPair } from "@openvuln/shared/crypto";
 import type { Hono } from "hono";
 import type { ServiceConfig } from "../infra/config.js";
 import { loadConfig } from "../infra/config.js";
@@ -55,7 +55,11 @@ export async function setupTestApp(): Promise<TestContext> {
 
 export async function cleanTables(): Promise<void> {
   const db = getDb();
-  await db`TRUNCATE findings, scan_jobs, projects, admin_nonces CASCADE`;
+  await db`
+    TRUNCATE findings, finding_artifacts, scan_jobs, projects, admin_nonces,
+      sessions, github_identities, repo_access_grants, submit_rate_limits
+    CASCADE
+  `;
 }
 
 export async function seedProject(opts?: {
@@ -97,20 +101,21 @@ export async function seedFinding(
   const title = opts?.title ?? "Secret finding title";
   const severity = opts?.severity ?? "high";
   const cvss = opts?.cvssScore ?? 7.5;
-  if (!adminKeys) adminKeys = generateAdminKeyPair();
-  const enc = encryptForAdmin(adminKeys.publicKeyPem, id, {
+  const detailJson = {
     title,
     primary_file: "src/secret.ts",
     detail: { description: "should never leak publicly" },
-  });
+  };
   await db`
     INSERT INTO findings (
       id, project_id, scan_job_id, finding_key, severity, cwe,
-      enc_payload, disclosure_state, disclosed_at, disclosed_title,
+      enc_payload, title, primary_file, detail_json,
+      disclosure_state, disclosed_at, disclosed_title,
       cvss_score, item_type, poc_status
     ) VALUES (
       ${id}::uuid, ${projectId}::uuid, ${scanJobId}::uuid, ${key}, ${severity},
-      'CWE-89', ${enc}, ${disclosure},
+      'CWE-89', ${""}, ${title}, ${"src/secret.ts"}, ${JSON.stringify(detailJson)}::jsonb,
+      ${disclosure},
       ${disclosure === "disclosed" ? new Date() : null},
       ${disclosure === "disclosed" ? title : null},
       ${cvss}, 'finding', 'confirmed'
