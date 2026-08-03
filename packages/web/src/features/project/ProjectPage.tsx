@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowUpRight,
+  Check,
   ChevronDown,
   Download,
   ExternalLink,
@@ -436,18 +437,25 @@ function ScanProgressPage({
 
   const queued = state === "queued";
   const loading = state === "loading";
+  const dispatching = state === "dispatching";
+  const currentStage = queued ? 0 : dispatching ? 1 : 2;
+  const stages = ["Queued", "Preparing", "Scanning", "Results"];
   const statusLabel = loading
     ? "Loading scan status"
     : queued
       ? "Waiting in scan queue"
-      : "AI security analysis in progress";
+      : dispatching
+        ? "Preparing the scan"
+        : "AI security analysis in progress";
   const detail = loading
     ? "Retrieving the latest status…"
     : queued
       ? "The repository is queued and will start automatically when a scanner is available."
-      : findingsSoFar > 0
-        ? `${findingsSoFar} confirmed finding${findingsSoFar === 1 ? "" : "s"} so far. Analysis is still running.`
-        : "VulnHunter is analyzing the repository. Results will appear after the scan completes.";
+      : dispatching
+        ? "OpenVuln is packaging the repository and handing it to an available scanner."
+        : findingsSoFar > 0
+          ? `${findingsSoFar} confirmed finding${findingsSoFar === 1 ? "" : "s"} so far. Analysis is still running.`
+          : "VulnHunter is analyzing the repository. Results will appear after the scan completes.";
 
   return (
     <div className="openvuln-home fixed inset-0 z-50 overflow-y-auto bg-black text-white">
@@ -511,13 +519,52 @@ function ScanProgressPage({
             <p className="text-sm font-medium text-[#f0f2f6]">{statusLabel}</p>
           </div>
           <p className="mt-3 text-sm leading-6 text-[#85868d]">{detail}</p>
-          <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-[#202126]">
-            <div className="h-full w-2/5 animate-pulse rounded-full bg-gradient-to-r from-[#5f6273] via-[#d0d3dc] to-[#5f6273] motion-reduce:animate-none" />
-          </div>
           {!loading && (
-            <p className="mt-3 text-xs text-[#66676e]">
-              Status refreshes automatically every 5 seconds.
-            </p>
+            <div className="mt-5 border-t border-[#27282e] pt-4">
+              <div className="flex items-center justify-between text-xs text-[#66676e]">
+                <span>Current stage</span>
+                <span>
+                  {currentStage + 1} of {stages.length}
+                </span>
+              </div>
+              <ol className="mt-3 grid grid-cols-4 gap-2" aria-label="Scan stages">
+                {stages.map((stageLabel, index) => {
+                  const complete = index < currentStage;
+                  const current = index === currentStage;
+                  return (
+                    <li
+                      key={stageLabel}
+                      className={`flex min-w-0 flex-col items-center gap-2 rounded-xl border px-2 py-3 text-center ${
+                        current
+                          ? "border-[#4b4d58] bg-[#1a1b20] text-[#f0f2f6]"
+                          : complete
+                            ? "border-[#303139] bg-[#151619] text-[#acacb0]"
+                            : "border-[#24252a] bg-[#121317] text-[#5f6067]"
+                      }`}
+                      aria-current={current ? "step" : undefined}
+                    >
+                      <span
+                        className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] ${
+                          current
+                            ? "border-[#b7bac5] bg-[#d5d7df] text-[#111216]"
+                            : complete
+                              ? "border-[#555762] bg-[#26272d] text-[#d5d7df]"
+                              : "border-[#303139] text-[#5f6067]"
+                        }`}
+                      >
+                        {complete ? <Check size={13} strokeWidth={2.2} /> : index + 1}
+                      </span>
+                      <span className="truncate text-[11px] font-medium sm:text-xs">
+                        {stageLabel}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+              <p className="mt-3 text-xs text-[#66676e]">
+                This shows status stages, not elapsed-time progress. Refreshes every 5 seconds.
+              </p>
+            </div>
           )}
         </div>
 
