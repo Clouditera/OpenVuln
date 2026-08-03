@@ -2,10 +2,11 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./features/home/HomePage";
-import { ZaiLandingPage } from "./features/home/ZaiLandingPage";
+import { ProductHomePage } from "./features/home/ProductHomePage";
 import { SubmitPage } from "./features/submit/SubmitPage";
 import { ProjectPage } from "./features/project/ProjectPage";
 import { AboutPage } from "./features/about/AboutPage";
+import { getLandingMode } from "./shared/api/client";
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -16,7 +17,9 @@ const qc = new QueryClient({
   },
 });
 
-const Landing = import.meta.env.VITE_LANDING === "zai" ? ZaiLandingPage : HomePage;
+function Landing() {
+  return getLandingMode() === "product" ? <ProductHomePage /> : <HomePage />;
+}
 
 export function App() {
   return (

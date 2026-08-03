@@ -1,9 +1,9 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Absolute API origin for split deploy (HF Static). Empty = same-origin. */
+  /** Optional dev-only API origin. Production uses public/config.js. */
   readonly VITE_API_BASE_URL?: string;
-  /** `zai` → Z.ai marketing landing on `/` (HF build). */
+  /** Optional dev-only landing override. Production uses public/config.js. */
   readonly VITE_LANDING?: string;
 }
 

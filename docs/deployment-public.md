@@ -381,3 +381,24 @@ Collaborator commits recovered on branch **`recover/hf-zai-landing`** (HF `8afb4
 2. CI / developer: `pnpm --filter @openvuln/web build:hf`
 3. Publish `packages/web/dist/**` to HF Space `main` (static SDK)
 4. Product UI on VulnAgent: `pnpm --filter @openvuln/web build` → `/var/www/openvuln`
+
+---
+
+## Frontend runtime config (no hardcoded API URL)
+
+Static host serves `config.js` next to `index.html`:
+
+```js
+window.__OPENVULN__ = {
+  apiBase: "",                          // same-origin /api
+  // apiBase: "https://openvuln.clouditera.com",  // cross-origin (HF)
+  landing: "zai",                       // collaborator landing
+  // landing: "product",                // full product deck
+};
+```
+
+- **Build** does not embed production API host.
+- **Deploy** rewrites `config.js` per environment.
+- Optional Vite `VITE_API_BASE_URL` / `VITE_LANDING` only for local dev.
+
+Product UI archive: branch `archive/product-ui`, tag `v0.1.0-product`, source `ProductHomePage.tsx`.

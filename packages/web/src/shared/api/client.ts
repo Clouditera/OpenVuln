@@ -18,16 +18,51 @@ export class ApiError extends Error {
   }
 }
 
+export type OpenVulnRuntimeConfig = {
+  /** API origin with no trailing slash. Empty = same-origin relative /api. */
+  apiBase?: string;
+  /** Which home page to show. */
+  landing?: "zai" | "product";
+};
+
+declare global {
+  interface Window {
+    __OPENVULN__?: OpenVulnRuntimeConfig;
+  }
+}
+
 /**
- * Empty / unset → same-origin relative paths (VulnAgent nginx SPA + /api).
- * HF Static build: packages/web/.env.hf → VITE_API_BASE_URL=https://openvuln.clouditera.com
+ * Resolve API base at runtime (deploy-time config.js), then optional Vite dev env.
+ * Default: "" → same-origin `/api/...` (no hardcoded production URL in the bundle).
  */
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+export function getApiBase(): string {
+  if (typeof window !== "undefined") {
+    const runtime = window.__OPENVULN__?.apiBase;
+    if (runtime !== undefined && runtime !== null) {
+      return String(runtime).replace(/\/$/, "");
+    }
+  }
+  const vite = import.meta.env.VITE_API_BASE_URL;
+  if (typeof vite === "string" && vite.length > 0) {
+    return vite.replace(/\/$/, "");
+  }
+  return "";
+}
+
+export function getLandingMode(): "zai" | "product" {
+  if (typeof window !== "undefined") {
+    const l = window.__OPENVULN__?.landing;
+    if (l === "product" || l === "zai") return l;
+  }
+  const vite = import.meta.env.VITE_LANDING;
+  if (vite === "product" || vite === "zai") return vite;
+  return "zai";
+}
 
 /** Absolute or root-relative URL for API paths and download links. */
 export function apiUrl(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
-  return `${API_BASE}${p}`;
+  return `${getApiBase()}${p}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -72,7 +107,9 @@ export const api = {
     return request<ProjectListResponse>(`/api/projects${qs ? `?${qs}` : ""}`);
   },
   getProject: (owner: string, repo: string) =>
-    request<ProjectPublicView>(`/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`),
+    request<ProjectPublicView>(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    ),
   submitProject: (body: SubmitProjectRequest) =>
     request<SubmitProjectResponse>("/api/projects", {
       method: "POST",

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert } from "lucide-react";
+import { ArrowUp, CircleAlert, Github, LoaderCircle } from "lucide-react";
 import { ApiError, api } from "../shared/api/client";
 import { Button } from "./Button";
 
@@ -26,14 +26,19 @@ function mapError(err: unknown): string {
   if (err.status === 404) {
     return "This repository is private or does not exist. OpenVuln scans public projects only.";
   }
+  if (err.status >= 500) {
+    return "OpenVuln is temporarily unavailable. Please try again in a moment.";
+  }
   return message || err.message || "Submission failed.";
 }
 
 export function RepoSubmitForm({
   size = "default",
+  appearance = "default",
   className = "",
 }: {
   size?: "default" | "hero";
+  appearance?: "default" | "dark";
   className?: string;
 }) {
   const nav = useNavigate();
@@ -42,6 +47,7 @@ export function RepoSubmitForm({
   const [pending, setPending] = useState(false);
 
   const hero = size === "hero";
+  const dark = appearance === "dark";
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +69,66 @@ export function RepoSubmitForm({
       setPending(false);
     }
   };
+
+  if (dark) {
+    return (
+      <form
+        onSubmit={(e) => void onSubmit(e)}
+        className={className}
+        aria-label="Submit a GitHub repository"
+        aria-busy={pending}
+      >
+        <div
+          className={`openvuln-composer group flex min-h-[66px] items-center gap-3 rounded-[22px] border bg-[#111216] p-2 pl-5 shadow-[0_24px_90px_rgba(0,0,0,0.52)] transition focus-within:bg-[#15161b] focus-within:shadow-[0_28px_110px_rgba(68,70,88,0.2)] ${
+            error ? "border-[#a94d55]" : "border-[#333] focus-within:border-[#555866]"
+          }`}
+        >
+          <Github
+            size={20}
+            className="shrink-0 text-[#6d6f78] transition group-focus-within:text-[#acacb0]"
+          />
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              setError(null);
+            }}
+            placeholder="Paste a public GitHub repository URL"
+            spellCheck={false}
+            className="min-w-0 flex-1 bg-transparent py-3 text-[15px] text-[#f0f2f6] outline-none placeholder:text-[#696a70] sm:text-base"
+            aria-label="GitHub repository URL"
+            aria-invalid={!!error}
+          />
+          <button
+            type="submit"
+            aria-label={pending ? "Submitting repository" : "Analyze repository"}
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-[#0d0d0f] bg-[#ebecf0] text-[#0d0d0f] shadow-sm transition hover:scale-[1.03] hover:bg-white active:scale-95 focus-ring-dark disabled:cursor-not-allowed disabled:bg-[#484a58] disabled:text-[#989aa5] disabled:opacity-100"
+            disabled={!url.trim() || pending}
+          >
+            {pending ? (
+              <LoaderCircle size={20} className="animate-spin motion-reduce:animate-none" />
+            ) : (
+              <ArrowUp size={21} strokeWidth={2.2} />
+            )}
+          </button>
+        </div>
+
+        <div className="mt-3 flex min-h-5 items-start justify-center gap-1.5 text-center text-xs text-[#77787e]">
+          {error ? (
+            <span className="inline-flex items-start gap-1.5 text-[#ff9ca5]" role="alert">
+              <CircleAlert size={14} className="mt-px shrink-0" />
+              <span>{error}</span>
+            </span>
+          ) : pending ? (
+            <span className="text-[#b9bfd2]" role="status">Submitting repository…</span>
+          ) : (
+            <span>Public repositories only · No sign-in required</span>
+          )}
+        </div>
+      </form>
+    );
+  }
 
   return (
     <form onSubmit={(e) => void onSubmit(e)} className={className}>
