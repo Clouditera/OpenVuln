@@ -1,5 +1,6 @@
 import type {
   DisclosureState,
+  ProjectCard,
   OverviewStats,
   ProjectListResponse,
   ProjectPublicView,
@@ -114,6 +115,23 @@ export interface OwnerFindingDetail extends OwnerFindingSummary {
   artifacts: OwnerArtifact[];
 }
 
+
+/* ── 站内通知（task-78c9fb3a，契约以 architect 简案为准） ── */
+
+export interface NotificationItem {
+  id: string;
+  type: string; // v1: "scan_completed"
+  payload: {
+    project_id: string;
+    full_name: string;
+    scan_job_id: string;
+    counts: { critical: number; high: number; medium: number; low: number };
+    no_value: boolean;
+  };
+  read_at: string | null;
+  created_at: string;
+}
+
 export const api = {
   overview: () => request<OverviewStats>("/api/stats/overview"),
   listProjects: (params?: { sort?: string; page?: number; page_size?: number }) => {
@@ -148,4 +166,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ finding_ids: findingIds }),
     }),
+  notifications: (limit = 20) =>
+    request<{ notifications: NotificationItem[]; unread_count: number }>(
+      `/api/notifications?limit=${limit}`,
+    ),
+  markNotificationsRead: (ids: string[]) =>
+    request<void>("/api/notifications/read", { method: "POST", body: JSON.stringify({ ids }) }),
+  markAllNotificationsRead: () =>
+    request<void>("/api/notifications/read-all", { method: "POST" }),
+  myProjects: () => request<{ projects: ProjectCard[] }>("/api/my/projects"),
 };

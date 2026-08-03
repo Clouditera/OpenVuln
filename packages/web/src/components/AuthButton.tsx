@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { Github, LogOut, ChevronDown } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Github, LogOut, ChevronDown, FolderGit2 } from "lucide-react";
 import { loginUrl } from "../shared/api/client";
 import { useLogout, useMe } from "../features/auth/useAuth";
 
@@ -12,6 +12,7 @@ export function AuthButton({ appearance = "light" }: { appearance?: "light" | "d
   const meQ = useMe();
   const logoutM = useLogout();
   const { pathname, search } = useLocation();
+  const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +99,23 @@ export function AuthButton({ appearance = "light" }: { appearance?: "light" | "d
           >
             {user.login}
           </div>
+          <a
+            role="menuitem"
+            href="/my"
+            onClick={(e) => {
+              e.preventDefault();
+              setOpen(false);
+              nav("/my");
+            }}
+            className={`flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[13px] transition-colors ${
+              dark
+                ? "text-[#acacb0] hover:bg-[#1a1b20] hover:text-white"
+                : "text-ink-secondary hover:bg-surface-sunken hover:text-ink"
+            }`}
+          >
+            <FolderGit2 size={14} />
+            My submissions
+          </a>
           <button
             type="button"
             role="menuitem"

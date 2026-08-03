@@ -14,6 +14,7 @@ import { HeroStats } from "../../components/HeroStats";
 import { EventTicker } from "../../components/EventTicker";
 import { ScanDurationNotice } from "../../components/ScanDurationNotice";
 import { AuthButton } from "../../components/AuthButton";
+import { NotificationBell } from "../../components/NotificationBell";
 
 /**
  * 深色 deck（task-5ee34751 fish 定稿）：PPT 式两页整页滚动恢复，
@@ -134,6 +135,7 @@ export function ProductHomePage() {
           OpenVuln
         </button>
         <div className="flex items-center gap-2">
+          <NotificationBell appearance="dark" />
           <AuthButton appearance="dark" />
           <a
             href={OWN_REPO}

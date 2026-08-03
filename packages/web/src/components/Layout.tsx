@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Github } from "lucide-react";
 import { AuthButton } from "./AuthButton";
+import { NotificationBell } from "./NotificationBell";
 
 const VH_HOME = "https://vulnhunt.clouditera.com";
 /** OpenVuln public repo; override at build time via VITE_GITHUB_REPO_URL. */
@@ -25,6 +26,7 @@ export function Layout() {
           </div>
 
           <div className="flex items-center gap-2">
+            <NotificationBell appearance="light" />
             <AuthButton appearance="light" />
             <a
               href={OWN_REPO}

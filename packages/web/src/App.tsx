@@ -5,6 +5,7 @@ import { ProductHomePage } from "./features/home/ProductHomePage";
 import { SubmitPage } from "./features/submit/SubmitPage";
 import { ProjectPage } from "./features/project/ProjectPage";
 import { AboutPage } from "./features/about/AboutPage";
+import { MyProjectsPage } from "./features/my/MyProjectsPage";
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -28,6 +29,7 @@ export function App() {
             <Route path="pulse" element={<Navigate to="/" replace />} />
             <Route path="submit" element={<SubmitPage />} />
             <Route path="p/:owner/:repo" element={<ProjectPage />} />
+            <Route path="my" element={<MyProjectsPage />} />
             <Route path="about" element={<AboutPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
