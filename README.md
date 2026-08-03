@@ -19,8 +19,7 @@ public; detailed findings stay private to verified maintainers until they
 disclose.
 
 > Prototype status. Core loop (submit → queue → scan → stats → owner disclose →
-> report download) works in mock mode; real VulnHunter + GitHub OAuth wiring is
-> next.
+> report download) works with a real VulnHunter backend.
 
 **Repo:** https://github.com/Clouditera/OpenVuln
 
@@ -28,7 +27,7 @@ disclose.
 
 - Anonymous project submit (GitHub public repos only)
 - DB-backed scan queue with configurable concurrency
-- VulnHunter client (cookie / token / mock)
+- VulnHunter client (cookie / token)
 - Public stats + severity / CWE views (no owner-only detail leakage)
 - GitHub OAuth owner verification (admin/maintain)
 - Owner-driven batch disclosure
@@ -48,7 +47,7 @@ docker exec deploy-postgres-1 psql -U openvuln -d postgres \
   -c "CREATE DATABASE openvuln_test OWNER openvuln;" 2>/dev/null || true
 
 cp .env.example .env
-# edit .env as needed — defaults work for local mock demo
+# edit .env — set VULNHUNTER_* and ADMIN_* for your environment
 
 pnpm --filter @openvuln/shared build
 pnpm --filter @openvuln/service build
@@ -87,7 +86,6 @@ See [`.env.example`](./.env.example). Important knobs:
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | Postgres connection |
-| `VULNHUNTER_MOCK` | `true` = in-process mock engine |
 | `VULNHUNTER_BASE_URL` / auth | Real VulnHunter instance |
 | `SCAN_CONCURRENCY` | In-flight scans (default 1) |
 | `SCAN_COOLDOWN_DAYS` | Re-submit lock; demo uses `36500` (once per project) |

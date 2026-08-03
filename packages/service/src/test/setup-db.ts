@@ -2,17 +2,14 @@
  * Integration test helpers. Always uses openvuln_test — never the demo DB.
  */
 import { randomUUID } from "node:crypto";
-import { generateAdminKeyPair, encryptForAdmin } from "@openvuln/shared/crypto";
-import { initDb, closeDb, getDb, runMigrations } from "../infra/db/index.js";
-import { loadConfig } from "../infra/config.js";
-import {
-  initVulnHunterClient,
-  setVulnHunterClient,
-  MockVulnHunterClient,
-} from "../features/vulnhunter/index.js";
-import { createApp } from "../server.js";
-import type { ServiceConfig } from "../infra/config.js";
+import { encryptForAdmin, generateAdminKeyPair } from "@openvuln/shared/crypto";
 import type { Hono } from "hono";
+import type { ServiceConfig } from "../infra/config.js";
+import { loadConfig } from "../infra/config.js";
+import { closeDb, getDb, initDb, runMigrations } from "../infra/db/index.js";
+import { initVulnHunterClient, setVulnHunterClient } from "../features/vulnhunter/index.js";
+import { createApp } from "../server.js";
+import { MockVulnHunterClient } from "./fixtures/mock-vh-client.js";
 
 export interface TestContext {
   app: Hono;
@@ -26,17 +23,19 @@ let started = false;
 let adminKeys: ReturnType<typeof generateAdminKeyPair> | null = null;
 
 export async function setupTestApp(): Promise<TestContext> {
-  process.env.VULNHUNTER_MOCK = "true";
-  // Tests must not hit codeload.github.com — force git/mock create path
+  // Fixture VH client only — product code has no mock mode.
+  // Avoid codeload.github.com during dispatch tests.
   process.env.VH_SOURCE_MODE = "git";
   process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "test-admin-token";
+  process.env.VULNHUNTER_AUTH_MODE = process.env.VULNHUNTER_AUTH_MODE ?? "token";
+  process.env.VULNHUNTER_API_TOKEN = process.env.VULNHUNTER_API_TOKEN ?? "test-vh-token";
+  delete process.env.VULNHUNTER_MOCK;
   if (!adminKeys) {
     adminKeys = generateAdminKeyPair();
     process.env.ADMIN_PUBLIC_KEY = adminKeys.publicKeyEnv;
   }
   process.env.DATABASE_URL =
     process.env.TEST_DATABASE_URL ??
-    // Demo PG is on :5434 (ov-pg-tmp); :5433 host map is broken on this machine.
     "postgresql://openvuln:openvuln@127.0.0.1:5434/openvuln_test";
 
   const config = loadConfig();
@@ -131,7 +130,6 @@ export async function seedScanJob(projectId: string, state = "completed"): Promi
     RETURNING id::text
   `;
   const jobId = rows[0].id;
-  // Public aggregates join projects.current_scan_job_id — keep tests honest.
   if (state === "completed") {
     await db`
       UPDATE projects SET current_scan_job_id = ${jobId}::uuid WHERE id = ${projectId}::uuid

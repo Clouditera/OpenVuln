@@ -163,7 +163,6 @@ sudo certbot --nginx -d openvuln.clouditera.com
 | `VULNHUNTER_AUTH_MODE` | `token` |
 | `VULNHUNTER_API_TOKEN` | production `vht_…` |
 | `VULNHUNTER_CREDENTIAL_ID` | LLM credential id |
-| `VULNHUNTER_MOCK` | `false` |
 | `VH_SOURCE_MODE` | `archive` |
 | `SCAN_CONCURRENCY` | `2`–`4` (share CPU with VH workers) |
 | `PUBLIC_BASE_URL` | `https://openvuln.clouditera.com` |

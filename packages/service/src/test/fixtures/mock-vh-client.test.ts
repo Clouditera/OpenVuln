@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MockVulnHunterClient } from "./mock-client.js";
+import { MockVulnHunterClient } from "./mock-vh-client.js";
 
 describe("MockVulnHunterClient", () => {
   it("creates task and completes with mixed findings", async () => {

@@ -20,7 +20,6 @@ docker build -f deploy/Dockerfile -t openvuln:local .
 # need a reachable Postgres (compose on :5433 or ov-pg-tmp :5434)
 docker run --rm -p 7860:7860 \
   -e DATABASE_URL=postgresql://openvuln:openvuln@host.docker.internal:5434/openvuln \
-  -e VULNHUNTER_MOCK=true \
   -e ADMIN_TOKEN=dev-admin-token \
   -e ADMIN_PUBLIC_KEY="$(cat .data/admin.pub.b64)" \
   -e CORS_ALLOWED_ORIGINS=http://localhost:5173 \
@@ -58,7 +57,6 @@ Required secrets for embedded mode: `POSTGRES_PASSWORD`, `MINIO_ROOT_USER`, `MIN
 | `VULNHUNTER_AUTH_MODE` | no | `token` |
 | `VULNHUNTER_API_TOKEN` | yes | `vht_…` service account token |
 | `VULNHUNTER_CREDENTIAL_ID` | yes* | if account has no default LLM credential |
-| `VULNHUNTER_MOCK` | no | must be `false` in prod |
 | `ADMIN_TOKEN` | yes | Bearer for `/api/admin/*` |
 | `ADMIN_PUBLIC_KEY` | yes | base64 PEM public key (`admin-cli keygen`) |
 | `CORS_ALLOWED_ORIGINS` | no | Static Space origin(s), comma-separated |

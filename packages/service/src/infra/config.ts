@@ -25,7 +25,7 @@ export interface ServiceConfig {
     password: string;
     apiToken: string;
     credentialId: string;
-    mock: boolean;
+
     create: {
       scanTimeoutHours: number;
       maxItemsPerRecon: number;
@@ -59,13 +59,12 @@ export function loadConfig(): ServiceConfig {
     throw new Error(`Invalid VULNHUNTER_AUTH_MODE: ${authModeRaw}`);
   }
   const authMode = authModeRaw as VulnHunterAuthMode;
-  const mock = optionalEnv("VULNHUNTER_MOCK", "false") === "true";
   const adminToken = optionalEnv("ADMIN_TOKEN", "");
   const adminKeyRaw = optionalEnv("ADMIN_PUBLIC_KEY", "");
   let adminPublicKeyPem = "";
   if (adminKeyRaw) {
     adminPublicKeyPem = decodePublicKeyEnv(adminKeyRaw);
-  } else if (!mock && process.env.NODE_ENV === "production") {
+  } else if (process.env.NODE_ENV === "production") {
     throw new Error("ADMIN_PUBLIC_KEY is required in production");
   }
   const corsRaw = optionalEnv("CORS_ALLOWED_ORIGINS", "");
@@ -90,7 +89,6 @@ export function loadConfig(): ServiceConfig {
       password: optionalEnv("VULNHUNTER_PASSWORD", ""),
       apiToken: optionalEnv("VULNHUNTER_API_TOKEN", ""),
       credentialId: optionalEnv("VULNHUNTER_CREDENTIAL_ID", ""),
-      mock,
       create: {
         scanTimeoutHours: Number(optionalEnv("VH_SCAN_TIMEOUT_HOURS", "24")),
         maxItemsPerRecon: Number(optionalEnv("VH_MAX_ITEMS_PER_RECON", "10")),

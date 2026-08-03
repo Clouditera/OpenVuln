@@ -8,7 +8,7 @@ import { createApp } from "./server.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  logger.info({ port: config.port, mock: config.vulnhunter.mock }, "Starting OpenVuln service");
+  logger.info({ port: config.port, vhAuth: config.vulnhunter.authMode }, "Starting OpenVuln service");
 
   await initDb(config.db.url);
   await runMigrations();

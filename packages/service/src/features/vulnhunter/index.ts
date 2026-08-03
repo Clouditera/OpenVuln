@@ -3,7 +3,6 @@ import { logger } from "../../infra/logger.js";
 import type { VulnHunterClient } from "./client.js";
 import { CookieVulnHunterClient } from "./cookie-client.js";
 import { TokenVulnHunterClient } from "./token-client.js";
-import { MockVulnHunterClient } from "./mock-client.js";
 
 export type { VulnHunterClient, VhFindingMeta, VhTaskState } from "./client.js";
 export {
@@ -11,15 +10,11 @@ export {
   isVhTaskGoneError,
   isVhTaskNotFoundBody,
 } from "./client.js";
-export { MockVulnHunterClient } from "./mock-client.js";
 
 let _client: VulnHunterClient | null = null;
 
 export function initVulnHunterClient(config: ServiceConfig): VulnHunterClient {
-  if (config.vulnhunter.mock) {
-    logger.info("VulnHunter client: MOCK mode");
-    _client = new MockVulnHunterClient();
-  } else if (config.vulnhunter.authMode === "token") {
+  if (config.vulnhunter.authMode === "token") {
     if (!config.vulnhunter.apiToken) {
       throw new Error("VULNHUNTER_API_TOKEN required when AUTH_MODE=token");
     }

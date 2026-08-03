@@ -19,7 +19,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # Optional full stack (mock VH). Prefer scripts/run-real-vh.sh for real mode.
+  # Optional full stack. Prefer scripts/run-real-vh.sh for real VH.
   # service:
   #   build:
   #     context: ..
@@ -28,7 +28,6 @@ services:
   #     - "7860:7860"
   #   environment:
   #     DATABASE_URL: postgresql://openvuln:openvuln@postgres:5432/openvuln
-  #     VULNHUNTER_MOCK: "true"
   #     PORT: "7860"
   #     ADMIN_TOKEN: dev-admin-token
   #     # ADMIN_PUBLIC_KEY: ...

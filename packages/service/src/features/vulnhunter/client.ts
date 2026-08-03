@@ -1,4 +1,4 @@
-/** VulnHunter client interface — switch point for cookie/token/mock. */
+/** VulnHunter client interface — switch point for cookie/token. */
 
 export type VhTaskState =
   | "queued"

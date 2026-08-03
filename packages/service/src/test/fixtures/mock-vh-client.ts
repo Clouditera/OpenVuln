@@ -6,7 +6,7 @@ import {
   type VhFindingMeta,
   type VhTaskState,
   VhTaskGoneError,
-} from "./client.js";
+} from "../../features/vulnhunter/client.js";
 
 /** Soft cap for harvested text (bytes of UTF-8). */
 export const MOCK_ARTIFACT_MAX_CHARS = 1_000_000;

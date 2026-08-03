@@ -278,7 +278,7 @@ async function dispatchOnce(concurrency: number): Promise<void> {
       let taskId: string;
 
       // Mock never hits real GitHub/VH upload; archive mode is for real TOKEN/cookie clients.
-      if (cfg.vulnhunter.sourceMode === "archive" && !cfg.vulnhunter.mock) {
+      if (cfg.vulnhunter.sourceMode === "archive") {
         // Resolve HEAD SHA → pin zipball → multipart upload
         const parsed =
           parseGitHubUrl(project.html_url) ??
