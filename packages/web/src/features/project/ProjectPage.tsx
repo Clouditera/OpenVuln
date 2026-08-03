@@ -277,8 +277,8 @@ export function ProjectPage() {
 
               <div className="mt-10 rounded-md border border-line bg-surface-raised p-5">
                 <p className="text-sm leading-relaxed text-ink-secondary">
-                  Detailed findings are reviewed by the OpenVuln operations team and shared privately
-                  with project maintainers. Public disclosure happens after maintainer confirmation.
+                  Detailed findings are visible to signed-in repository maintainers. Maintainers
+                  review the full reports and choose what to disclose publicly.
                 </p>
               </div>
 
@@ -351,8 +351,8 @@ export function ProjectPage() {
                 No disclosures yet
               </h2>
               <p className="mt-2 w-full text-sm leading-relaxed text-ink-secondary">
-                Full finding details stay encrypted until an operator discloses them. Confirmed
-                disclosures appear here with the original report content, and on the Overview tab.
+                Full finding details are visible to repository maintainers after sign-in. Disclosed
+                findings appear here with the full report content, and on the Overview tab.
               </p>
             </div>
           ) : (

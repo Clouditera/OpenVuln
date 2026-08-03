@@ -4,10 +4,11 @@ type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "md" | "lg";
 
 const styles: Record<Variant, string> = {
-  primary: "bg-accent-600 text-white hover:bg-accent-700 border border-transparent",
-  secondary: "bg-surface-raised text-ink border border-line hover:bg-surface-sunken",
-  ghost: "bg-transparent text-ink-secondary border border-transparent hover:bg-surface-sunken",
-  danger: "bg-danger text-white hover:bg-red-800 border border-transparent",
+  // 协作者深色体系：主按钮 = 白底黑字（composer submit 同族）
+  primary: "bg-[#ebecf0] text-[#0d0d0f] hover:bg-white border border-transparent",
+  secondary: "bg-surface-raised text-ink border border-[#333] hover:border-[#484a58] hover:bg-surface-sunken",
+  ghost: "bg-transparent text-ink-secondary border border-transparent hover:bg-surface-sunken hover:text-ink",
+  danger: "bg-danger text-white hover:bg-[#d63f3f] border border-transparent",
 };
 
 // 高度集中在 size prop，禁止 className 覆盖高度（Tailwind 同源类冲突靠 CSS 顺序，不可靠）

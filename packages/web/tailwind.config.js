@@ -4,53 +4,47 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Clouditera 设计规范（fish 提供 .bossmode-attachments 设计规范-颜色与字体.md）
+        // ── 深色视觉语言（对齐协作者着陆页，task-5ee34751 fish 定稿）──
         surface: {
-          DEFAULT: "#FFFFFF",   // N1 大可视区
-          raised: "#FFFFFF",    // N1 列表 BG
-          sunken: "#F8F8F8",    // N3 可视区 2
-          header: "#F8FAFE",    // N2 标题 BG
+          DEFAULT: "#000000",   // 页面底（openvuln-home bg-black）
+          raised: "#111216",    // 卡片（composer bg）
+          sunken: "#15161b",    // 井/hover（focus-within bg）
+          header: "#030303",    // 顶栏（pill bg）
         },
-        line: "#E7E8EB",        // N5 分割线
+        line: "#26272c",        // 分隔线/边框（#26272c ~ #2f3037）
         ink: {
-          DEFAULT: "#0A1730",   // B7 文字主色
-          secondary: "#616D7E", // N9 文字/次
-          tertiary: "#BBC3CC",  // N7 文字辅助
+          DEFAULT: "#f0f2f6",   // 主文字
+          secondary: "#acacb0", // 次文字
+          tertiary: "#696a70",  // 辅助/placeholder
         },
+        // 交互蓝：深色底链接/聚焦/进行中（Clouditera 规范深底 accent）
         accent: {
-          50: "#EEF7FF",   // B1
-          100: "#D4E8FF",  // B2 hover/底色
-          200: "#A9D1FF",  // B3 边框
-          600: "#298CFF",  // B4 主色
-          700: "#1871F5",  // B5 按钮 hover
-          800: "#145BE1",  // B6 点击
+          50: "rgba(40, 209, 255, 0.10)",
+          100: "rgba(40, 209, 255, 0.16)",
+          200: "rgba(40, 209, 255, 0.28)",
+          600: "#28D1FF",  // 深底主色（原 accent-dark）
+          700: "#5CDDFF",  // hover 亮一档
+          800: "#8AE6FF",
         },
-        // 功能色（规范）：严重/高危/中危/低危 + 中性 info
+        // 功能色深底版：亮 ink + 半透明 bg，bar 用亮色
         sev: {
-          critical: { ink: "#8F1D1D", bg: "#F9E9E9", bar: "#C22828" },
-          high:     { ink: "#C22828", bg: "#FEEDED", bar: "#F24F4F" },
-          medium:   { ink: "#C24E0E", bg: "#FFF1EB", bar: "#FF733C" },
-          low:      { ink: "#8A6D0B", bg: "#FEF9EA", bar: "#F7C530" },
+          critical: { ink: "#FF6B6B", bg: "rgba(242, 79, 79, 0.16)", bar: "#F24F4F" },
+          high:     { ink: "#F24F4F", bg: "rgba(242, 79, 79, 0.12)", bar: "#F24F4F" },
+          medium:   { ink: "#FF8A5C", bg: "rgba(255, 115, 60, 0.13)", bar: "#FF733C" },
+          low:      { ink: "#F7C530", bg: "rgba(247, 197, 48, 0.12)", bar: "#F7C530" },
           // info：VH 兜底档，公众 UI 不展示，仅防御保留
-          info:     { ink: "#616D7E", bg: "#F8F9FA", bar: "#BBC3CC" },
+          info:     { ink: "#acacb0", bg: "rgba(172, 172, 176, 0.10)", bar: "#696a70" },
         },
-        // Pulse 深色页（/pulse）：规范 N10 导航深蓝
-        pulse: {
-          bg: "#1B2033", panel: "#252C46", line: "#364061",
-          ink: "#FFFFFF", secondary: "#BBC3CC",
-        },
-        "sev-dark": { high: "#F24F4F", medium: "#FF733C", low: "#F7C530", info: "#BBC3CC" },
-        "accent-dark": "#28D1FF", // 规范「进行中」蓝，深底链接/箭头
-        ai: { DEFAULT: "#9285FF", bg: "#F4F2FF", ink: "#5B4BD6" }, // 规范「特殊」紫，AI 专用
-        success: { DEFAULT: "#3AD186", bg: "#EBFBF3", ink: "#1B8A56" },
-        danger: "#C22828",
+        ai: { DEFAULT: "#9285FF", bg: "rgba(146, 133, 255, 0.13)", ink: "#A79DFF" }, // AI 紫（深底）
+        success: { DEFAULT: "#3AD186", bg: "rgba(58, 209, 134, 0.12)", ink: "#3AD186" },
+        danger: "#F24F4F",
         warning: "#FF733C",
-        running: { DEFAULT: "#28D1FF", bg: "#E5FAFF", ink: "#0E7A9E" },
+        running: { DEFAULT: "#28D1FF", bg: "rgba(40, 209, 255, 0.12)", ink: "#28D1FF" },
       },
       fontFamily: {
-        // 规范：英文 Roboto，中文思源黑体（系统回退链承载，UI 英文优先）
-        display: ["Roboto", '"Source Han Sans SC"', '"PingFang SC"', '"Microsoft YaHei"', "system-ui", "sans-serif"],
-        sans: ["Roboto", '"Source Han Sans SC"', '"PingFang SC"', '"Microsoft YaHei"', "system-ui", "sans-serif"],
+        // 协作者体系：系统字栈（着陆页 openvuln-home 同族）
+        display: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif'],
+        sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif'],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
       maxWidth: {

@@ -97,7 +97,7 @@ export function OwnerFindings({
               type="checkbox"
               checked={allChecked}
               onChange={toggleAll}
-              className="h-4 w-4 rounded border-line accent-[#298CFF]"
+              className="h-4 w-4 rounded border-line accent-[#28D1FF]"
             />
             Select undisclosed ({disclosable.length})
           </label>
@@ -171,7 +171,7 @@ export function OwnerFindings({
                     onClick={(e) => e.stopPropagation()}
                     onChange={() => toggle(f.id)}
                     aria-label={disclosed ? `${f.finding_key} already disclosed` : `Select ${f.finding_key}`}
-                    className="mt-1 h-4 w-4 shrink-0 rounded border-line accent-[#298CFF] disabled:opacity-40"
+                    className="mt-1 h-4 w-4 shrink-0 rounded border-line accent-[#28D1FF] disabled:opacity-40"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

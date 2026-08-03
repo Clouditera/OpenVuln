@@ -14,13 +14,14 @@
   }
 
   ::selection {
-    @apply bg-accent-100 text-ink;
+    background: rgba(40, 209, 255, 0.24);
+    color: #f0f2f6;
   }
 }
 
 @layer utilities {
   .focus-ring {
-    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 focus-visible:ring-offset-2 focus-visible:ring-offset-black;
   }
 
   .focus-ring-dark {

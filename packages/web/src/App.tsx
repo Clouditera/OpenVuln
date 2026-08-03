@@ -1,7 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "./components/Layout";
-import { HomePage } from "./features/home/HomePage";
 import { ProductHomePage } from "./features/home/ProductHomePage";
 import { SubmitPage } from "./features/submit/SubmitPage";
 import { ProjectPage } from "./features/project/ProjectPage";
@@ -16,8 +15,8 @@ const qc = new QueryClient({
   },
 });
 
-/** Build-time: VITE_LANDING=product | zai (default zai for online collab landing). */
-const Landing = import.meta.env.VITE_LANDING === "product" ? ProductHomePage : HomePage;
+/** 单着陆页：深色 deck（task-5ee34751 融合定稿）。 */
+const Landing = ProductHomePage;
 
 export function App() {
   return (

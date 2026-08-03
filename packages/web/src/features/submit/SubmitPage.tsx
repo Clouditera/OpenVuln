@@ -40,7 +40,7 @@ export function SubmitPage() {
             </p>
             <a
               href={loginUrl("/submit")}
-              className="mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-accent-600 px-4 text-sm font-medium text-white transition-colors hover:bg-accent-700 focus-ring"
+              className="mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-[#ebecf0] px-4 text-sm font-medium text-[#0d0d0f] transition-colors hover:bg-white focus-ring"
             >
               <Github size={16} />
               Sign in with GitHub
