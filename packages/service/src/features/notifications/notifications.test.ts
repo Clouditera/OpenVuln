@@ -109,17 +109,17 @@ describe("notifications", () => {
     expect(bobList.status).toBe(200);
     const bobBody = (await bobList.json()) as {
       unread_count: number;
-      items: Array<{ id: string }>;
+      notifications: Array<{ id: string }>;
     };
     expect(bobBody.unread_count).toBe(1);
-    expect(bobBody.items).toHaveLength(1);
+    expect(bobBody.notifications).toHaveLength(1);
 
     const eveList = await ctx.app.request("/api/notifications", {
       headers: { cookie: `ov_session=${eveCookie}` },
     });
-    const eveBody = (await eveList.json()) as { unread_count: number; items: unknown[] };
+    const eveBody = (await eveList.json()) as { unread_count: number; notifications: unknown[] };
     expect(eveBody.unread_count).toBe(0);
-    expect(eveBody.items).toHaveLength(0);
+    expect(eveBody.notifications).toHaveLength(0);
 
     const read = await ctx.app.request("/api/notifications/read-all", {
       method: "POST",

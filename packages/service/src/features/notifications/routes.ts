@@ -15,7 +15,8 @@ notificationsRouter.get("/", async (c) => {
   const result = await storage.listForUser(user.githubUserId, limit);
   return c.json({
     unread_count: result.unread_count,
-    items: result.items.map((it) => ({
+    // designer contract: `notifications` (not `items`)
+    notifications: result.items.map((it) => ({
       id: it.id,
       type: it.type,
       payload: it.payload,
