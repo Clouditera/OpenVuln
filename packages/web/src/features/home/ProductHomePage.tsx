@@ -22,6 +22,9 @@ import { NotificationBell } from "../../components/NotificationBell";
  * 页1 = 品牌 hero（协作者原版）+ HeroStats + EventTicker；
  * 页2 = 项目列表（内部滚动，状态跨导航保留）。
  */
+// fish No.955/956：欢迎页统计数字先隐藏（数据口径好看后开关放回）
+const SHOW_HERO_STATS = false;
+
 const ZAI_HF_AVATAR = "https://huggingface.co/api/avatars/zai-org";
 const OWN_REPO = "https://github.com/Clouditera/OpenVuln";
 
@@ -183,9 +186,11 @@ export function ProductHomePage() {
                 />
                 <ScanDurationNotice className="mt-4 w-full max-w-2xl" />
 
-                <div className="mt-7 w-full">
-                  <HeroStats stats={overview.data} />
-                </div>
+                {SHOW_HERO_STATS && (
+                  <div className="mt-7 w-full">
+                    <HeroStats stats={overview.data} />
+                  </div>
+                )}
                 <div className="mt-8 w-full max-w-3xl text-left">
                   <EventTicker events={overview.data?.recent} />
                 </div>
