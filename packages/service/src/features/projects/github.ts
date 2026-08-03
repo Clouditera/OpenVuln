@@ -31,14 +31,34 @@ export async function fetchRepoMeta(
   repo: string,
   serverToken?: string,
 ): Promise<GitHubRepoMeta> {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-    headers: authHeaders(serverToken || undefined),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: authHeaders(serverToken || undefined),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new AppError("ERR_UPSTREAM", {
+      service: "github",
+      step: "repo_meta",
+      reason: "network",
+      message: `GitHub unreachable: ${msg.slice(0, 200)}`,
+    });
+  }
   if (res.status === 404) {
     throw new AppError("ERR_NOT_FOUND", { resource: "github_repo", owner, repo });
   }
   if (res.status === 403) {
+    // Could be rate limit or auth — treat as upstream-ish rate limit for server token path
     throw new AppError("ERR_RATE_LIMIT", { service: "github" });
+  }
+  if (res.status === 401) {
+    throw new AppError("ERR_UPSTREAM", {
+      service: "github",
+      step: "repo_meta",
+      status: 401,
+      message: "GitHub rejected server credentials",
+    });
   }
   if (!res.ok) {
     throw new AppError("ERR_UPSTREAM", {

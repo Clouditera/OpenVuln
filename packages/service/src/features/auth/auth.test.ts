@@ -184,4 +184,34 @@ describe("requireRepoAccess", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("BUG-AUTH-1: GitHub 401 Bad credentials → 403 not 500", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/stranger" });
+    await storage.upsertIdentity({ userId: 88, login: "stranger", avatarUrl: null });
+    const { rawId } = await storage.createSession({
+      githubUserId: 88,
+      githubToken: "gho_bad",
+      ttlDays: 1,
+    });
+    vi.spyOn(gh, "fetchRepoPermission").mockRejectedValue(
+      new gh.GithubPermissionError("auth", 401, "GitHub permission API 401: Bad credentials"),
+    );
+    const res = await ctx.app.request(`/api/projects/${projectId}/findings`, {
+      headers: { cookie: `ov_session=${rawId}` },
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string; context?: { reason?: string } } };
+    expect(body.error.code).toBe("ERR_FORBIDDEN");
+    expect(body.error.context?.reason).toBe("repo_permission_denied");
+  });
+
+  it("GitHub upstream failure → 502", async () => {
+    await storage.upsertIdentity({ userId: 99, login: "bob", avatarUrl: null });
+    vi.spyOn(gh, "fetchRepoPermission").mockRejectedValue(
+      new gh.GithubPermissionError("upstream", 502, "GitHub permission API 502"),
+    );
+    await expect(requireRepoAccess(user, "acme", "up", 777, ctx.config)).rejects.toMatchObject({
+      code: "ERR_UPSTREAM",
+    });
+  });
 });

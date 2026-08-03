@@ -5,4 +5,5 @@ export {
   exchangeCodeForToken,
   fetchGithubUser,
   fetchRepoPermission,
+  GithubPermissionError,
 } from "./github-oauth.js";

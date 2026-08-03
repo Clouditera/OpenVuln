@@ -52,6 +52,17 @@ export async function fetchGithubUser(token: string): Promise<{
 
 export type GhPermission = "admin" | "maintain" | "write" | "triage" | "read" | "none";
 
+export class GithubPermissionError extends Error {
+  constructor(
+    public readonly kind: "auth" | "upstream",
+    public readonly status: number | null,
+    message: string,
+  ) {
+    super(message);
+    this.name = "GithubPermissionError";
+  }
+}
+
 export async function fetchRepoPermission(
   token: string,
   owner: string,
@@ -59,18 +70,43 @@ export async function fetchRepoPermission(
   username: string,
 ): Promise<GhPermission> {
   const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}/permission`;
-  const res = await fetch(url, {
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
-      "user-agent": "OpenVuln",
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "user-agent": "OpenVuln",
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn({ err, owner, repo }, "GitHub permission check network failure");
+    throw new GithubPermissionError(
+      "upstream",
+      null,
+      `GitHub permission API unreachable: ${msg.slice(0, 200)}`,
+    );
+  }
   if (res.status === 404) return "none";
+  // 401 Bad credentials / 403 forbidden → treat as no access (caller maps to 403)
+  if (res.status === 401 || res.status === 403) {
+    const t = await res.text().catch(() => "");
+    logger.warn({ status: res.status, owner, repo }, "GitHub permission denied/invalid token");
+    throw new GithubPermissionError(
+      "auth",
+      res.status,
+      `GitHub permission API ${res.status}: ${t.slice(0, 200)}`,
+    );
+  }
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     logger.warn({ status: res.status, owner, repo }, "GitHub permission check failed");
-    throw new Error(`GitHub permission API ${res.status}: ${t.slice(0, 200)}`);
+    throw new GithubPermissionError(
+      "upstream",
+      res.status,
+      `GitHub permission API ${res.status}: ${t.slice(0, 200)}`,
+    );
   }
   const data = (await res.json()) as { permission?: string };
   const p = (data.permission ?? "none") as GhPermission;
