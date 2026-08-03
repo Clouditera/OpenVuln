@@ -1,9 +1,9 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Optional dev-only API origin. Production uses public/config.js. */
+  /** API origin, no trailing slash. Empty/unset = same-origin `/api`. */
   readonly VITE_API_BASE_URL?: string;
-  /** Optional dev-only landing override. Production uses public/config.js. */
+  /** `product` = full product deck; default/other = collaborator Z.ai landing. */
   readonly VITE_LANDING?: string;
 }
 

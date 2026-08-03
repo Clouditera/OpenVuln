@@ -384,21 +384,28 @@ Collaborator commits recovered on branch **`recover/hf-zai-landing`** (HF `8afb4
 
 ---
 
-## Frontend runtime config (no hardcoded API URL)
+## Frontend API base (build-time env)
 
-Static host serves `config.js` next to `index.html`:
+No production API host is committed. Vite inlines env at **build** time:
 
-```js
-window.__OPENVULN__ = {
-  apiBase: "",                          // same-origin /api
-  // apiBase: "https://openvuln.clouditera.com",  // cross-origin (HF)
-  landing: "zai",                       // collaborator landing
-  // landing: "product",                // full product deck
-};
+| Variable | Default | Meaning |
+|---|---|---|
+| `VITE_API_BASE_URL` | empty | Same-origin `/api/...`. Set to full origin for cross-origin static hosts (e.g. HF). |
+| `VITE_LANDING` | (unset → zai) | `zai` collaborator landing; `product` full product deck (`ProductHomePage`). |
+
+Examples:
+
+```bash
+# Same-origin (openvuln.clouditera.com nginx SPA + /api)
+pnpm --filter @openvuln/web build
+
+# HF Static / other origin
+VITE_API_BASE_URL=https://openvuln.clouditera.com pnpm --filter @openvuln/web build
+
+# Product deck UI
+VITE_LANDING=product pnpm --filter @openvuln/web build
 ```
 
-- **Build** does not embed production API host.
-- **Deploy** rewrites `config.js` per environment.
-- Optional Vite `VITE_API_BASE_URL` / `VITE_LANDING` only for local dev.
+See `packages/web/.env.example`. Do not commit `.env` / `.env.local` with secrets.
 
-Product UI archive: branch `archive/product-ui`, tag `v0.1.0-product`, source `ProductHomePage.tsx`.
+Product UI archive: branch `archive/product-ui`, tag `v0.1.0-product`.

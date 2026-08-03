@@ -6,7 +6,6 @@ import { ProductHomePage } from "./features/home/ProductHomePage";
 import { SubmitPage } from "./features/submit/SubmitPage";
 import { ProjectPage } from "./features/project/ProjectPage";
 import { AboutPage } from "./features/about/AboutPage";
-import { getLandingMode } from "./shared/api/client";
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -17,9 +16,8 @@ const qc = new QueryClient({
   },
 });
 
-function Landing() {
-  return getLandingMode() === "product" ? <ProductHomePage /> : <HomePage />;
-}
+/** Build-time: VITE_LANDING=product | zai (default zai for online collab landing). */
+const Landing = import.meta.env.VITE_LANDING === "product" ? ProductHomePage : HomePage;
 
 export function App() {
   return (
