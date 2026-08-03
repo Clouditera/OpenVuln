@@ -100,4 +100,36 @@ describe("scan queue integration", () => {
     expect(done?.state).toBe("failed");
     expect(await scanStorage.finalizeInFlight(job.id, "again")).toBeNull();
   });
+
+  it("VH no-scan-value failure → completed empty (Scanned + 0)", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/empty-src" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    ctx.mockVh.forceFailed(scanning!.vulnhunter_task_id!, {
+      failureReason: "Error: 源码不完整：功能代码缺失，无法建立完整的代码功能语义。",
+      metadata: { source_incomplete: true, prepare: { reason: "partial_source" } },
+    });
+    await scanQueueInternal.pollOnce(3);
+    const done = await scanStorage.getScanJob(job.id);
+    expect(done?.state).toBe("completed");
+    expect(done?.findings_so_far).toBe(0);
+    expect(done?.fail_reason_internal ?? "").toMatch(/no_scan_value/);
+    const counts = await findingsStorage.severityCounts(projectId);
+    expect(counts.critical + counts.high + counts.medium + counts.low).toBe(0);
+  });
+
+  it("VH ordinary failure still marks failed after grace", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/real-fail" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    ctx.mockVh.forceFailed(scanning!.vulnhunter_task_id!, {
+      failureReason: "worker OOM killed",
+    });
+    await scanQueueInternal.pollOnce(1);
+    const failed = await scanStorage.getScanJob(job.id);
+    expect(failed?.state).toBe("failed");
+    expect(failed?.fail_reason_internal ?? "").toMatch(/vh_state:failed/);
+  });
 });

@@ -18,6 +18,23 @@ describe("mapFindingSeverity (NVD)", () => {
   });
 });
 
+describe("isNoScanValueFailure", () => {
+  const fn = scanQueueInternal.isNoScanValueFailure;
+
+  it("matches Chinese incomplete-source reason and metadata flags", () => {
+    expect(
+      fn("Error: 源码不完整：功能代码缺失，无法建立完整的代码功能语义。", null),
+    ).toBe(true);
+    expect(fn("other", { source_incomplete: true })).toBe(true);
+    expect(fn(null, { prepare: { reason: "partial_source" } })).toBe(true);
+  });
+
+  it("does not match ordinary failures", () => {
+    expect(fn("worker OOM killed", null)).toBe(false);
+    expect(fn("timeout", { prepare: { reason: "sandbox_error" } })).toBe(false);
+  });
+});
+
 describe("shouldIngestFinding", () => {
   const ok = scanQueueInternal.shouldIngestFinding;
 

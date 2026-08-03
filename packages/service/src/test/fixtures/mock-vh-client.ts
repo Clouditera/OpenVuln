@@ -113,8 +113,15 @@ export class MockVulnHunterClient implements VulnHunterClient {
     return { taskId };
   }
 
-  async getTask(taskId: string): Promise<{ state: VhTaskState }> {
-    const t = this.tasks.get(taskId);
+  async getTask(taskId: string): Promise<{
+    state: VhTaskState;
+    failureReason?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }> {
+    const t = this.tasks.get(taskId) as MockTask & {
+      failureReason?: string;
+      metadata?: Record<string, unknown>;
+    };
     if (!t) throw new VhTaskGoneError(taskId);
 
     if (!t.forced) {
@@ -125,7 +132,27 @@ export class MockVulnHunterClient implements VulnHunterClient {
       else t.state = "completed";
     }
 
-    return { state: t.state };
+    return {
+      state: t.state,
+      failureReason: t.failureReason ?? null,
+      metadata: t.metadata ?? null,
+    };
+  }
+
+  /** Test: mark task failed with optional reason/metadata (no-scan-value cases). */
+  forceFailed(
+    taskId: string,
+    opts?: { failureReason?: string; metadata?: Record<string, unknown> },
+  ): void {
+    const t = this.tasks.get(taskId) as MockTask & {
+      failureReason?: string;
+      metadata?: Record<string, unknown>;
+    };
+    if (!t) throw new Error(`Mock VH: unknown task ${taskId}`);
+    t.state = "failed";
+    t.forced = true;
+    t.failureReason = opts?.failureReason;
+    t.metadata = opts?.metadata;
   }
 
   /** Test helper: remove task so getTask throws VhTaskGoneError. */

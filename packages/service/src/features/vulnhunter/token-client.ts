@@ -152,7 +152,11 @@ export class TokenVulnHunterClient implements VulnHunterClient {
     return { taskId };
   }
 
-  async getTask(taskId: string): Promise<{ state: VhTaskState }> {
+  async getTask(taskId: string): Promise<{
+    state: VhTaskState;
+    failureReason?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }> {
     const res = await this.request(`/api/tasks/${taskId}`);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -161,10 +165,24 @@ export class TokenVulnHunterClient implements VulnHunterClient {
       }
       throw new Error(`VH getTask failed: ${res.status} ${text.slice(0, 500)}`);
     }
-    const data = (await res.json()) as { task?: { state?: string }; state?: string };
-    const state = (data.task?.state ?? data.state) as VhTaskState | undefined;
+    const data = (await res.json()) as {
+      task?: {
+        state?: string;
+        failure_reason?: string | null;
+        metadata?: Record<string, unknown> | null;
+      };
+      state?: string;
+      failure_reason?: string | null;
+      metadata?: Record<string, unknown> | null;
+    };
+    const task = data.task;
+    const state = (task?.state ?? data.state) as VhTaskState | undefined;
     if (!state) throw new Error("VH getTask: missing state");
-    return { state };
+    return {
+      state,
+      failureReason: task?.failure_reason ?? data.failure_reason ?? null,
+      metadata: task?.metadata ?? data.metadata ?? null,
+    };
   }
 
   async listFindings(taskId: string): Promise<VhFindingMeta[]> {

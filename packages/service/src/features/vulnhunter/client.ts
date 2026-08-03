@@ -107,7 +107,13 @@ export interface VulnHunterClient {
   createScanTask(input: CreateScanTaskInput): Promise<{ taskId: string }>;
   /** Preferred path: multipart source archive upload. */
   createScanTaskFromArchive(input: CreateScanTaskFromArchiveInput): Promise<{ taskId: string }>;
-  getTask(taskId: string): Promise<{ state: VhTaskState }>;
+  getTask(taskId: string): Promise<{
+    state: VhTaskState;
+    /** VH failure_reason text when state=failed */
+    failureReason?: string | null;
+    /** VH task.metadata (may include source_incomplete / prepare.reason) */
+    metadata?: Record<string, unknown> | null;
+  }>;
   listFindings(taskId: string): Promise<VhFindingMeta[]>;
   getFindingDetail(taskId: string, key: string): Promise<unknown>;
   /** List poc/exp files for a finding (finding_key or VH id). */

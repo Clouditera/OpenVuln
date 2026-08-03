@@ -24,6 +24,57 @@ const KNOWN_VH_ACTIVE = new Set([
   "cancelled",
 ]);
 
+/**
+ * VH "no audit value" failures → treat as completed empty scan (Scanned + 0 findings).
+ * Keywords + metadata flags; env VH_NO_VALUE_FAIL_PATTERNS=comma|separated|extra
+ */
+export function isNoScanValueFailure(
+  failureReason: string | null | undefined,
+  metadata?: Record<string, unknown> | null,
+): boolean {
+  const meta = metadata ?? {};
+  if (meta.source_incomplete === true) return true;
+  const prep = meta.prepare;
+  if (prep && typeof prep === "object" && !Array.isArray(prep)) {
+    const reason = String((prep as Record<string, unknown>).reason ?? "");
+    if (reason === "partial_source" || reason === "incomplete_source") return true;
+    if ((prep as Record<string, unknown>).project_complete === false) return true;
+  }
+  const text = (failureReason ?? "").toLowerCase();
+  if (!text) return false;
+  const defaults = [
+    "源码不完整",
+    "功能代码缺失",
+    "无法建立完整的代码功能语义",
+    "partial_source",
+    "incomplete source",
+    "no scannable",
+  ];
+  const extra = (process.env.VH_NO_VALUE_FAIL_PATTERNS ?? "")
+    .split("|")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  for (const p of [...defaults, ...extra]) {
+    if (p && text.includes(p.toLowerCase())) return true;
+  }
+  return false;
+}
+
+/** Mark job completed with zero findings (empty public result). */
+async function markCompletedEmpty(jobId: string, projectId: string, reason: string): Promise<void> {
+  const db = getDb();
+  await db.begin(async (tx) => {
+    await storage.updateFindingsSoFar(jobId, 0, tx);
+    await storage.setCurrentScanJob(projectId, jobId, tx);
+    await storage.markCompleted(jobId, tx);
+    await tx`
+      UPDATE scan_jobs
+      SET fail_reason_internal = ${reason.slice(0, 2000)}
+      WHERE id = ${jobId}::uuid
+    `;
+  });
+}
+
 let dispatcherTimer: ReturnType<typeof setInterval> | null = null;
 let pollerTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
@@ -363,7 +414,7 @@ async function pollOnce(gracePolls = 3): Promise<void> {
   for (const job of jobs) {
     if (!job.vulnhunter_task_id) continue;
     try {
-      const { state } = await vh.getTask(job.vulnhunter_task_id);
+      const { state, failureReason, metadata } = await vh.getTask(job.vulnhunter_task_id);
       successes += 1;
 
       if (state === "completed") {
@@ -374,15 +425,27 @@ async function pollOnce(gracePolls = 3): Promise<void> {
         await storage.resetConsecutiveFailures(job.id);
         logger.info({ jobId: job.id }, "VH task cancelled — keeping OV job scanning");
       } else if (state === "failed") {
-        const n = await storage.bumpConsecutiveFailures(job.id);
-        if (n >= gracePolls) {
-          await storage.markFailed(job.id, `vh_state:failed (x${n})`);
-          logger.warn({ jobId: job.id, strikes: n }, "Scan job failed upstream (grace exhausted)");
-        } else {
-          logger.warn(
-            { jobId: job.id, strikes: n, grace: gracePolls },
-            "VH failed — grace poll, keeping scanning",
+        if (isNoScanValueFailure(failureReason, metadata)) {
+          const note = `vh_no_scan_value:${(failureReason ?? "partial_source").slice(0, 500)}`;
+          await markCompletedEmpty(job.id, job.project_id, note);
+          logger.info(
+            { jobId: job.id, failureReason: failureReason?.slice(0, 120) },
+            "VH no-scan-value failure → completed empty",
           );
+        } else {
+          const n = await storage.bumpConsecutiveFailures(job.id);
+          if (n >= gracePolls) {
+            const detail = failureReason
+              ? `vh_state:failed (x${n}): ${failureReason.slice(0, 400)}`
+              : `vh_state:failed (x${n})`;
+            await storage.markFailed(job.id, detail);
+            logger.warn({ jobId: job.id, strikes: n }, "Scan job failed upstream (grace exhausted)");
+          } else {
+            logger.warn(
+              { jobId: job.id, strikes: n, grace: gracePolls },
+              "VH failed — grace poll, keeping scanning",
+            );
+          }
         }
       } else if (
         state === "running" ||
@@ -738,6 +801,8 @@ export const _internal = {
   countIngestibleFromList,
   mapFindingSeverity,
   shouldIngestFinding,
+  isNoScanValueFailure,
+  markCompletedEmpty,
   setRuntimeConcurrency,
   getScanConfigView,
   noteVhOutage,
