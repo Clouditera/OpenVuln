@@ -6,6 +6,11 @@ import { TokenVulnHunterClient } from "./token-client.js";
 import { MockVulnHunterClient } from "./mock-client.js";
 
 export type { VulnHunterClient, VhFindingMeta, VhTaskState } from "./client.js";
+export {
+  VhTaskGoneError,
+  isVhTaskGoneError,
+  isVhTaskNotFoundBody,
+} from "./client.js";
 export { MockVulnHunterClient } from "./mock-client.js";
 
 let _client: VulnHunterClient | null = null;

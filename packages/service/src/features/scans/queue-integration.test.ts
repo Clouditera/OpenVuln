@@ -49,4 +49,55 @@ describe("scan queue integration", () => {
     await scanQueueInternal.dispatchOnce(1);
     expect(await scanStorage.countInFlight()).toBe(1);
   });
+
+  it("VH task gone → hard-deletes job+project and frees slot", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/gone-me" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    expect(scanning?.state).toBe("scanning");
+    const vhId = scanning!.vulnhunter_task_id!;
+    ctx.mockVh.forceGone(vhId);
+    await scanQueueInternal.pollOnce(3);
+    expect(await scanStorage.getScanJob(job.id)).toBeNull();
+    // project gone when no remaining jobs
+    const db = (await import("../../infra/db/index.js")).getDb();
+    const rows = await db`SELECT id FROM projects WHERE id = ${projectId}::uuid`;
+    expect(rows.length).toBe(0);
+    expect(await scanStorage.countInFlight()).toBe(0);
+  });
+
+  it("VH cancelled → keeps scanning (no fail)", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/cancel-me" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    ctx.mockVh.forceState(scanning!.vulnhunter_task_id!, "cancelled");
+    await scanQueueInternal.pollOnce(3);
+    const after = await scanStorage.getScanJob(job.id);
+    expect(after?.state).toBe("scanning");
+    expect(after?.fail_reason_internal).toBeNull();
+  });
+
+  it("unknown VH state × grace → failed", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/weird-state" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    ctx.mockVh.forceState(scanning!.vulnhunter_task_id!, "stopped_by_ops");
+    await scanQueueInternal.pollOnce(2);
+    await scanQueueInternal.pollOnce(2);
+    const failed = await scanStorage.getScanJob(job.id);
+    expect(failed?.state).toBe("failed");
+    expect(failed?.fail_reason_internal ?? "").toMatch(/unknown/);
+  });
+
+  it("admin finalize marks in-flight failed", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/finalize-me" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanQueueInternal.dispatchOnce(2);
+    const done = await scanStorage.finalizeInFlight(job.id, "admin_finalize:test");
+    expect(done?.state).toBe("failed");
+    expect(await scanStorage.finalizeInFlight(job.id, "again")).toBeNull();
+  });
 });

@@ -1,10 +1,12 @@
 import { logger } from "../../infra/logger.js";
-import type {
-  CreateScanTaskFromArchiveInput,
-  CreateScanTaskInput,
-  VulnHunterClient,
-  VhFindingMeta,
-  VhTaskState,
+import {
+  type CreateScanTaskFromArchiveInput,
+  type CreateScanTaskInput,
+  type VulnHunterClient,
+  type VhFindingMeta,
+  type VhTaskState,
+  isVhTaskNotFoundBody,
+  VhTaskGoneError,
 } from "./client.js";
 
 interface CookieClientOptions {
@@ -152,6 +154,9 @@ export class CookieVulnHunterClient implements VulnHunterClient {
     const res = await this.request(`/api/tasks/${taskId}`);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      if (isVhTaskNotFoundBody(res.status, body)) {
+        throw new VhTaskGoneError(taskId);
+      }
       throw new Error(`VH getTask failed: ${res.status} ${body}`);
     }
     const data = (await res.json()) as { task?: { state?: string }; state?: string };

@@ -1,10 +1,12 @@
 import { logger } from "../../infra/logger.js";
-import type {
-  CreateScanTaskFromArchiveInput,
-  CreateScanTaskInput,
-  VulnHunterClient,
-  VhFindingMeta,
-  VhTaskState,
+import {
+  type CreateScanTaskFromArchiveInput,
+  type CreateScanTaskInput,
+  type VulnHunterClient,
+  type VhFindingMeta,
+  type VhTaskState,
+  isVhTaskNotFoundBody,
+  VhTaskGoneError,
 } from "./client.js";
 
 interface TokenClientOptions {
@@ -154,6 +156,9 @@ export class TokenVulnHunterClient implements VulnHunterClient {
     const res = await this.request(`/api/tasks/${taskId}`);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      if (isVhTaskNotFoundBody(res.status, text)) {
+        throw new VhTaskGoneError(taskId);
+      }
       throw new Error(`VH getTask failed: ${res.status} ${text.slice(0, 500)}`);
     }
     const data = (await res.json()) as { task?: { state?: string }; state?: string };

@@ -45,6 +45,8 @@ export interface ServiceConfig {
     dispatcherIntervalMs: number;
     pollerIntervalMs: number;
     vhFailGracePolls: number;
+    /** dispatching older than this is requeued/failed. */
+    dispatchStaleMinutes: number;
   };
   adminToken: string;
   adminPublicKeyPem: string;
@@ -110,6 +112,8 @@ export function loadConfig(): ServiceConfig {
       dispatcherIntervalMs: Number(optionalEnv("SCAN_DISPATCHER_INTERVAL_MS", "10000")),
       pollerIntervalMs: Number(optionalEnv("SCAN_POLLER_INTERVAL_MS", "30000")),
       vhFailGracePolls: Number(optionalEnv("SCAN_VH_FAIL_GRACE_POLLS", "3")),
+      /** dispatching stuck longer than this → requeue or fail. */
+      dispatchStaleMinutes: Number(optionalEnv("SCAN_DISPATCH_STALE_MINUTES", "30")),
     },
     adminToken,
     adminPublicKeyPem,

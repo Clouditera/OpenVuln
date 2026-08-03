@@ -7,7 +7,36 @@ export type VhTaskState =
   | "completed"
   | "failed"
   | "cancelled"
-  | "paused";
+  | "paused"
+  /** Non-enum VH state — poller applies grace then fails. */
+  | (string & {});
+
+/**
+ * VH confirmed the task is gone (HTTP 404 + ERR_TASK_NOT_FOUND).
+ * Structured body proves API is reachable — distinct from network/5xx outages.
+ */
+export class VhTaskGoneError extends Error {
+  readonly code = "VH_TASK_GONE" as const;
+  constructor(public readonly taskId: string) {
+    super(`VH task gone: ${taskId}`);
+    this.name = "VhTaskGoneError";
+  }
+}
+
+export function isVhTaskGoneError(err: unknown): err is VhTaskGoneError {
+  return err instanceof VhTaskGoneError;
+}
+
+/** True when 404 body is the VH structured not-found (not nginx bare 404). */
+export function isVhTaskNotFoundBody(status: number, bodyText: string): boolean {
+  if (status !== 404) return false;
+  try {
+    const data = JSON.parse(bodyText) as { error?: { code?: string } };
+    return data?.error?.code === "ERR_TASK_NOT_FOUND";
+  } catch {
+    return false;
+  }
+}
 
 export interface VhFindingMeta {
   key: string;

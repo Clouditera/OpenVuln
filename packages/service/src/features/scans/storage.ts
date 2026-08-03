@@ -109,6 +109,80 @@ export async function markFailed(id: string, reason: string): Promise<void> {
   `;
 }
 
+/**
+ * VH task confirmed deleted (404 + ERR_TASK_NOT_FOUND).
+ * Deletes the scan_job; if the project has no remaining jobs, deletes the project too
+ * (cascades findings when present). Clears current_scan_job_id when it pointed here.
+ * Returns whether the project row was removed.
+ */
+export async function hardDeleteGoneJob(
+  jobId: string,
+  projectId: string,
+): Promise<{ projectDeleted: boolean }> {
+  const db = getDb();
+  return db.begin(async (tx) => {
+    await tx`
+      UPDATE projects
+      SET current_scan_job_id = NULL
+      WHERE id = ${projectId}::uuid
+        AND current_scan_job_id = ${jobId}::uuid
+    `;
+    // findings.scan_job_id has no ON DELETE CASCADE in 001 — delete findings first if any
+    await tx`DELETE FROM findings WHERE scan_job_id = ${jobId}::uuid`;
+    await tx`DELETE FROM scan_jobs WHERE id = ${jobId}::uuid`;
+    const remaining = await tx<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM scan_jobs WHERE project_id = ${projectId}::uuid
+    `;
+    const n = Number(remaining[0]?.n ?? 0);
+    if (n === 0) {
+      await tx`DELETE FROM projects WHERE id = ${projectId}::uuid`;
+      return { projectDeleted: true };
+    }
+    return { projectDeleted: false };
+  });
+}
+
+/** dispatching jobs whose started_at is older than staleMinutes. */
+export async function listStaleDispatching(staleMinutes: number): Promise<ScanJobRow[]> {
+  const db = getDb();
+  return db<ScanJobRow[]>`
+    SELECT
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+    FROM scan_jobs
+    WHERE state = 'dispatching'
+      AND started_at IS NOT NULL
+      AND started_at < now() - make_interval(mins => ${staleMinutes})
+    ORDER BY started_at ASC
+  `;
+}
+
+/** Manual finalize: scanning|dispatching → failed. Returns null if not eligible. */
+export async function finalizeInFlight(
+  id: string,
+  reason: string,
+): Promise<ScanJobRow | null> {
+  const db = getDb();
+  const rows = await db<ScanJobRow[]>`
+    UPDATE scan_jobs
+    SET state = 'failed',
+        fail_reason_internal = ${reason.slice(0, 2000)},
+        finished_at = now()
+    WHERE id = ${id}::uuid
+      AND state IN ('scanning', 'dispatching')
+    RETURNING
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+  `;
+  return rows[0] ?? null;
+}
+
 export async function markCompleted(id: string, sql: SqlLike = getDb()): Promise<void> {
   await sql`
     UPDATE scan_jobs

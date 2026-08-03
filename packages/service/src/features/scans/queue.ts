@@ -7,8 +7,22 @@ import { getDb } from "../../infra/db/index.js";
 import { logger } from "../../infra/logger.js";
 import { findingsStorage, harvestFindingArtifacts } from "../findings/index.js";
 import { githubApi, githubZipball, parseGitHubUrl } from "../projects/index.js";
-import { type VhFindingMeta, getVulnHunterClient } from "../vulnhunter/index.js";
+import {
+  type VhFindingMeta,
+  getVulnHunterClient,
+  isVhTaskGoneError,
+} from "../vulnhunter/index.js";
 import * as storage from "./storage.js";
+
+const KNOWN_VH_ACTIVE = new Set([
+  "running",
+  "preparing",
+  "queued",
+  "paused",
+  "completed",
+  "failed",
+  "cancelled",
+]);
 
 let dispatcherTimer: ReturnType<typeof setInterval> | null = null;
 let pollerTimer: ReturnType<typeof setInterval> | null = null;
@@ -202,8 +216,27 @@ export function setRuntimeConcurrency(n: number | null): number {
   return v;
 }
 
+async function reapStaleDispatching(staleMinutes: number): Promise<void> {
+  const stale = await storage.listStaleDispatching(staleMinutes);
+  for (const job of stale) {
+    if (job.attempt + 1 < DISPATCH_MAX_ATTEMPTS) {
+      await storage.requeueDispatching(job.id, "dispatch_stale");
+      logger.warn(
+        { jobId: job.id, attempt: job.attempt + 1, staleMinutes },
+        "Stale dispatching job requeued",
+      );
+    } else {
+      await storage.markFailed(job.id, "dispatch_stale");
+      logger.warn({ jobId: job.id }, "Stale dispatching job failed (max attempts)");
+    }
+  }
+}
+
 async function dispatchOnce(concurrency: number): Promise<void> {
   if (Date.now() < dispatchNotBefore) return;
+
+  const cfg = loadConfig();
+  await reapStaleDispatching(cfg.scan.dispatchStaleMinutes);
 
   const inFlight = await storage.countInFlight();
   const slots = concurrency - inFlight;
@@ -317,7 +350,7 @@ async function dispatchOnce(concurrency: number): Promise<void> {
   }
 }
 
-async function pollOnce(gracePolls: number): Promise<void> {
+async function pollOnce(gracePolls = 3): Promise<void> {
   if (Date.now() < pollNotBefore) return;
 
   const jobs = await storage.listScanningJobs();
@@ -337,8 +370,9 @@ async function pollOnce(gracePolls: number): Promise<void> {
         await syncCompletedFindings(job.id, job.project_id, job.vulnhunter_task_id);
         logger.info({ jobId: job.id }, "Scan job completed, findings synced");
       } else if (state === "cancelled") {
-        await storage.markFailed(job.id, "vh_state:cancelled");
-        logger.warn({ jobId: job.id }, "Scan job cancelled upstream");
+        // fish: cancel = pause; keep scanning, VH continue resumes same task id
+        await storage.resetConsecutiveFailures(job.id);
+        logger.info({ jobId: job.id }, "VH task cancelled — keeping OV job scanning");
       } else if (state === "failed") {
         const n = await storage.bumpConsecutiveFailures(job.id);
         if (n >= gracePolls) {
@@ -364,8 +398,33 @@ async function pollOnce(gracePolls: number): Promise<void> {
         } catch (err) {
           logger.warn({ err, jobId: job.id }, "so_far list count failed (will retry)");
         }
+      } else if (!KNOWN_VH_ACTIVE.has(state)) {
+        // Unknown VH state — grace then fail (do not hang forever)
+        const n = await storage.bumpConsecutiveFailures(job.id);
+        if (n >= gracePolls) {
+          await storage.markFailed(job.id, `vh_state:unknown:${String(state).slice(0, 64)} (x${n})`);
+          logger.warn({ jobId: job.id, state, strikes: n }, "Unknown VH state — marked failed");
+        } else {
+          logger.warn(
+            { jobId: job.id, state, strikes: n, grace: gracePolls },
+            "Unknown VH state — grace poll",
+          );
+        }
       }
     } catch (err) {
+      if (isVhTaskGoneError(err)) {
+        successes += 1;
+        try {
+          const result = await storage.hardDeleteGoneJob(job.id, job.project_id);
+          logger.warn(
+            { jobId: job.id, projectId: job.project_id, projectDeleted: result.projectDeleted },
+            "VH task gone — hard-deleted OV job/project",
+          );
+        } catch (delErr) {
+          logger.error({ err: delErr, jobId: job.id }, "hardDeleteGoneJob failed");
+        }
+        continue;
+      }
       if (isTransientVhError(err)) {
         transientFails += 1;
         logger.error({ err, jobId: job.id }, "Poll transient error (will retry)");

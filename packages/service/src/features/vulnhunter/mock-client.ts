@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type {
-  VulnHunterClient,
-  VhArtifactFilePreview,
-  VhFindingArtifactGroups,
-  VhFindingMeta,
-  VhTaskState,
+import {
+  type VulnHunterClient,
+  type VhArtifactFilePreview,
+  type VhFindingArtifactGroups,
+  type VhFindingMeta,
+  type VhTaskState,
+  VhTaskGoneError,
 } from "./client.js";
 
 /** Soft cap for harvested text (bytes of UTF-8). */
@@ -114,7 +115,7 @@ export class MockVulnHunterClient implements VulnHunterClient {
 
   async getTask(taskId: string): Promise<{ state: VhTaskState }> {
     const t = this.tasks.get(taskId);
-    if (!t) throw new Error(`Mock VH: unknown task ${taskId}`);
+    if (!t) throw new VhTaskGoneError(taskId);
 
     if (!t.forced) {
       const age = Date.now() - t.createdAt;
@@ -125,6 +126,19 @@ export class MockVulnHunterClient implements VulnHunterClient {
     }
 
     return { state: t.state };
+  }
+
+  /** Test helper: remove task so getTask throws VhTaskGoneError. */
+  forceGone(taskId: string): void {
+    this.tasks.delete(taskId);
+  }
+
+  /** Test helper: force a raw VH state string (including unknown). */
+  forceState(taskId: string, state: VhTaskState): void {
+    const t = this.tasks.get(taskId);
+    if (!t) throw new Error(`Mock VH: unknown task ${taskId}`);
+    t.state = state;
+    t.forced = true;
   }
 
   async listFindings(taskId: string): Promise<VhFindingMeta[]> {
@@ -242,13 +256,5 @@ export class MockVulnHunterClient implements VulnHunterClient {
 
   async healthCheck(): Promise<boolean> {
     return true;
-  }
-
-  forceState(taskId: string, state: VhTaskState): void {
-    const t = this.tasks.get(taskId);
-    if (t) {
-      t.state = state;
-      t.forced = true;
-    }
   }
 }

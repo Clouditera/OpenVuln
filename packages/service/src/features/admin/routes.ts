@@ -108,6 +108,38 @@ adminRouter.post("/scan-jobs/:jobId/resync", async (c) => {
 });
 
 /**
+ * POST /api/admin/scan-jobs/:id/finalize
+ * Escape hatch: scanning|dispatching → failed (does not delete rows).
+ * Body optional: { reason?: string }
+ */
+adminRouter.post("/scan-jobs/:jobId/finalize", async (c) => {
+  const jobId = c.req.param("jobId");
+  let reason = "admin_finalize";
+  try {
+    const body = (await c.req.json()) as { reason?: string };
+    if (typeof body?.reason === "string" && body.reason.trim()) {
+      reason = `admin_finalize:${body.reason.trim().slice(0, 200)}`;
+    }
+  } catch {
+    /* empty body ok */
+  }
+  const job = await scanStorage.finalizeInFlight(jobId, reason);
+  if (!job) {
+    const existing = await scanStorage.getScanJob(jobId);
+    if (!existing) throw new AppError("ERR_NOT_FOUND", { resource: "scan_job" });
+    throw new AppError("ERR_CONFLICT", {
+      reason: "not_in_flight",
+      state: existing.state,
+    });
+  }
+  return c.json({
+    id: job.id,
+    state: job.state,
+    fail_reason_internal: job.fail_reason_internal,
+  });
+});
+
+/**
  * GET /api/admin/scan-config — current concurrency + source (override|env).
  * PUT /api/admin/scan-config {concurrency:1..16} — memory override (restart clears).
  */
