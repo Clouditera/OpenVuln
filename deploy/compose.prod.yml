@@ -11,7 +11,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: openvuln-pg
+    container_name: ${COMPOSE_PROJECT_NAME:-openvuln}-pg
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-openvuln}
@@ -29,7 +29,7 @@ services:
 
   api:
     image: ${OPENVULN_API_IMAGE:-openvuln:api}
-    container_name: openvuln-api
+    container_name: ${COMPOSE_PROJECT_NAME:-openvuln}-api
     restart: unless-stopped
     depends_on:
       postgres:
@@ -50,7 +50,7 @@ services:
 
   web:
     image: ${OPENVULN_WEB_IMAGE:-openvuln:web}
-    container_name: openvuln-web
+    container_name: ${COMPOSE_PROJECT_NAME:-openvuln}-web
     restart: unless-stopped
     depends_on:
       - api
