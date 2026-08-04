@@ -21,8 +21,20 @@ authRouter.get("/github/login", async (c) => {
   if (!cfg.githubOAuth.clientId || !cfg.githubOAuth.clientSecret) {
     throw new AppError("ERR_INTERNAL", { reason: "oauth_not_configured" });
   }
-  const returnTo = c.req.query("return_to") || "/";
-  const safeReturn = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
+  const returnToRaw = c.req.query("return_to") || "/";
+  // Allow relative paths or whitelisted absolute origins (cross-origin deploy)
+  let safeReturn = "/";
+  if (returnToRaw.startsWith("/") && !returnToRaw.startsWith("//")) {
+    safeReturn = returnToRaw;
+  } else {
+    try {
+      const u = new URL(returnToRaw);
+      const origin = `${u.protocol}//${u.host}`;
+      if (cfg.corsAllowedOrigins.includes(origin)) safeReturn = returnToRaw;
+    } catch {
+      // invalid URL → fallback
+    }
+  }
   const state = signOAuthState(safeReturn, cfg.githubOAuth.stateSecret);
   const params = new URLSearchParams({
     client_id: cfg.githubOAuth.clientId,
@@ -38,7 +50,7 @@ authRouter.get("/github/callback", async (c) => {
   const code = c.req.query("code");
   const state = c.req.query("state");
   if (!code || !state) throw new AppError("ERR_VALIDATION", { reason: "missing_code_or_state" });
-  const verified = verifyOAuthState(state, cfg.githubOAuth.stateSecret);
+  const verified = verifyOAuthState(state, cfg.githubOAuth.stateSecret, cfg.corsAllowedOrigins);
   if (!verified) throw new AppError("ERR_VALIDATION", { reason: "invalid_oauth_state" });
 
   const token = await exchangeCodeForToken(code, cfg);
@@ -61,11 +73,14 @@ authRouter.get("/github/callback", async (c) => {
     ttlDays: SESSION_TTL_DAYS,
   });
 
+  // Cross-origin: SameSite=None+Secure so HF-space pages can send cookie
+  const origin = c.req.header("origin");
+  const crossOrigin = origin && cfg.corsAllowedOrigins.includes(origin);
   setCookie(c, COOKIE, rawId, {
     path: "/",
     httpOnly: true,
-    secure: cfg.publicBaseUrl.startsWith("https"),
-    sameSite: "Lax",
+    secure: true,
+    sameSite: crossOrigin ? "None" : "Lax",
     expires: expiresAt,
   });
   return c.redirect(verified.returnTo);
@@ -74,7 +89,14 @@ authRouter.get("/github/callback", async (c) => {
 authRouter.post("/logout", async (c) => {
   const raw = getCookie(c, COOKIE);
   if (raw) await storage.deleteSessionByRawId(raw);
-  deleteCookie(c, COOKIE, { path: "/" });
+  const cfg = c.get("config") as ServiceConfig;
+  const origin = c.req.header("origin");
+  const crossOrigin = origin && cfg.corsAllowedOrigins.includes(origin);
+  deleteCookie(c, COOKIE, {
+    path: "/",
+    secure: true,
+    sameSite: crossOrigin ? "None" : "Lax",
+  });
   return c.json({ ok: true });
 });
 

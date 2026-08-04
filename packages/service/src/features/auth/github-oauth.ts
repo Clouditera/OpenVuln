@@ -135,7 +135,10 @@ export async function fetchRepoPermission(
   return p;
 }
 
-/** Sign OAuth state (return_to + nonce + exp). */
+/** Sign OAuth state (return_to + nonce + exp).
+ *  returnTo may be a relative path (same-origin) or an absolute URL
+ *  if it matches a whitelisted origin (cross-origin deploy like HF).
+ */
 export function signOAuthState(returnTo: string, secret: string): string {
   const exp = Date.now() + 10 * 60 * 1000;
   const payload = Buffer.from(JSON.stringify({ r: returnTo, e: exp }), "utf8").toString(
@@ -148,6 +151,7 @@ export function signOAuthState(returnTo: string, secret: string): string {
 export function verifyOAuthState(
   state: string,
   secret: string,
+  allowedOrigins: string[] = [],
 ): { returnTo: string } | null {
   const [payload, sig] = state.split(".");
   if (!payload || !sig) return null;
@@ -165,9 +169,18 @@ export function verifyOAuthState(
       e?: number;
     };
     if (!data.r || !data.e || Date.now() > data.e) return null;
-    // open redirect guard: only relative paths
-    if (!data.r.startsWith("/") || data.r.startsWith("//")) return null;
-    return { returnTo: data.r };
+    const r = data.r;
+    // Relative path (same-origin)
+    if (r.startsWith("/") && !r.startsWith("//")) return { returnTo: r };
+    // Absolute URL — must match a whitelisted origin
+    try {
+      const u = new URL(r);
+      const origin = `${u.protocol}//${u.host}`;
+      if (allowedOrigins.includes(origin)) return { returnTo: r };
+    } catch {
+      // not a valid URL
+    }
+    return null;
   } catch {
     return null;
   }

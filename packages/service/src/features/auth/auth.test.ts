@@ -42,6 +42,21 @@ describe("auth oauth state", () => {
     expect(gh.verifyOAuthState(`${payload2}.${sig2}`, secret)).toBeNull();
   });
 
+  it("allows whitelisted cross-origin return_to", () => {
+    const allowed = ["https://zai-org-openvuln.hf.space"];
+    const r = "https://zai-org-openvuln.hf.space/submit";
+    const state = gh.signOAuthState(r, secret);
+    const v = gh.verifyOAuthState(state, secret, allowed);
+    expect(v).toEqual({ returnTo: r });
+  });
+
+  it("rejects non-whitelisted cross-origin return_to", () => {
+    const allowed = ["https://zai-org-openvuln.hf.space"];
+    const r = "https://evil.example/phish";
+    const state = gh.signOAuthState(r, secret);
+    expect(gh.verifyOAuthState(state, secret, allowed)).toBeNull();
+  });
+
   it("rejects expired state", () => {
     const payload = Buffer.from(
       JSON.stringify({ r: "/ok", e: Date.now() - 1 }),

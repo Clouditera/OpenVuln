@@ -70,7 +70,7 @@ export function createApp(config: ServiceConfig): Hono {
   app.route("/api/stats", statsRouter);
   app.route("/api/notifications", notificationsRouter);
   // designer: GET /api/my/projects (alias of /api/projects/mine)
-  app.get("/api/my/projects", async (c, next) => {
+  app.get("/api/my/projects", async (c) => {
     // rewrite path so projectsRouter /mine can handle via internal forward
     const url = new URL(c.req.url);
     url.pathname = "/api/projects/mine";
