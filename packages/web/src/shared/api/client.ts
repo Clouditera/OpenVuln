@@ -125,9 +125,12 @@ export function navigateToLogin(returnTo: string = currentReturnTo()): void {
 /** Popup OAuth callback return_to path. */
 export const POPUP_CALLBACK_PATH = "/auth/popup-callback";
 
-/** return_to for popup flow: always absolute to current origin + callback path. */
+/** return_to for popup flow: always the API origin + callback path.
+ *  The callback page MUST run on the API domain (clouditera), not the HF Space domain,
+ *  so that /api/me fetch is first-party (cookie works) rather than third-party (blocked).
+ */
 export function popupReturnTo(): string {
-  return window.location.origin + POPUP_CALLBACK_PATH;
+  return `${API_BASE}${POPUP_CALLBACK_PATH}`;
 }
 
 /** Navigate to OAuth login in popup (for embedded/iframe context). */
