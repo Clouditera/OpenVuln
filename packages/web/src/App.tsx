@@ -6,6 +6,7 @@ import { SubmitPage } from "./features/submit/SubmitPage";
 import { ProjectPage } from "./features/project/ProjectPage";
 import { AboutPage } from "./features/about/AboutPage";
 import { MyProjectsPage } from "./features/my/MyProjectsPage";
+import { PopupCallbackPage } from "./features/auth/PopupCallbackPage";
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -33,6 +34,8 @@ export function App() {
             <Route path="about" element={<AboutPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
+          {/* Popup OAuth callback — standalone (no Layout) */}
+          <Route path="/auth/popup-callback" element={<PopupCallbackPage />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

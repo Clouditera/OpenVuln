@@ -102,16 +102,36 @@ export function currentReturnTo(): string {
 }
 
 /**
- * Navigate to OAuth login, breaking out of iframe if embedded (HF Space).
- * GitHub blocks iframe via x-frame-options, so we must redirect the top window.
+ * Navigate to OAuth login.
+ * - iframe (HF Space hub): open popup window (sandbox blocks top navigation)
+ * - direct access (clouditera / HF subdomain): redirect current page
  */
 export function navigateToLogin(returnTo: string = currentReturnTo()): void {
   const url = loginUrl(returnTo);
-  if (isEmbedded() && window.top) {
-    window.top.location.href = url;
+  if (isEmbedded()) {
+    // Must call window.open synchronously in click handler to avoid popup blocker
+    const popup = window.open(url, "ov-oauth", "width=600,height=700,noopener,noreferrer");
+    if (!popup) {
+      // Popup blocked — fall back to top navigation (may work on some platforms)
+      if (window.top) window.top.location.href = url;
+    }
   } else {
     window.location.href = url;
   }
+}
+
+/** Popup OAuth callback return_to path. */
+export const POPUP_CALLBACK_PATH = "/auth/popup-callback";
+
+/** return_to for popup flow: always absolute to current origin + callback path. */
+export function popupReturnTo(): string {
+  return window.location.origin + POPUP_CALLBACK_PATH;
+}
+
+/** Navigate to OAuth login in popup (for embedded/iframe context). */
+export function navigateToLoginPopup(): void {
+  const url = loginUrl(popupReturnTo());
+  window.open(url, "ov-oauth", "width=600,height=700,noopener,noreferrer");
 }
 
 export interface OwnerFindingSummary {
