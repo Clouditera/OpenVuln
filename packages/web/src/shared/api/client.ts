@@ -74,10 +74,44 @@ export interface MeResponse {
   user: { id: number; login: string; avatar_url: string | null } | null;
 }
 
-/** GitHub OAuth 登录跳转（full-page redirect）。returnTo 必须站内路径。 */
+/** GitHub OAuth login URL (full-page redirect). */
 export function loginUrl(returnTo: string): string {
   const safe = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
   return apiUrl(`/api/auth/github/login?return_to=${encodeURIComponent(safe)}`);
+}
+
+/** 是否在 iframe 嵌套环境（HF Space 嵌入页；GitHub x-frame-options:deny，iframe 内跳 OAuth 必死）。 */
+export function isEmbedded(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 当前页作为 OAuth return_to：跨域部署（HF 静态站，API_BASE 与页面不同源）必须给
+ * 本站绝对地址（后端白名单已放行），授权完才回得来；同源部署（clouditera）用相对路径。
+ */
+export function currentReturnTo(): string {
+  const rel = window.location.pathname + window.location.search;
+  if (API_BASE && new URL(API_BASE).origin !== window.location.origin) {
+    return window.location.origin + rel;
+  }
+  return rel;
+}
+
+/**
+ * Navigate to OAuth login, breaking out of iframe if embedded (HF Space).
+ * GitHub blocks iframe via x-frame-options, so we must redirect the top window.
+ */
+export function navigateToLogin(returnTo: string = currentReturnTo()): void {
+  const url = loginUrl(returnTo);
+  if (isEmbedded() && window.top) {
+    window.top.location.href = url;
+  } else {
+    window.location.href = url;
+  }
 }
 
 export interface OwnerFindingSummary {

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowUp, CircleAlert, Github, LoaderCircle } from "lucide-react";
-import { ApiError, api, loginUrl } from "../shared/api/client";
+import { ApiError, api, navigateToLogin } from "../shared/api/client";
 import { useMe } from "../features/auth/useAuth";
 import { Button } from "./Button";
 
@@ -70,9 +70,7 @@ export function RepoSubmitForm({
     }
     // 未登录 → 整页跳 GitHub OAuth，登录后回到当前页
     if (meQ.data && !meQ.data.authenticated) {
-      window.location.assign(
-        loginUrl(window.location.pathname + window.location.search),
-      );
+      navigateToLogin(window.location.pathname + window.location.search);
       return;
     }
     setPending(true);

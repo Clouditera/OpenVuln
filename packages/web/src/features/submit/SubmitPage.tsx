@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { ArrowLeft, Github } from "lucide-react";
 import { RepoSubmitForm } from "../../components/RepoSubmitForm";
-import { loginUrl } from "../../shared/api/client";
+import { loginUrl, navigateToLogin } from "../../shared/api/client";
 import { useMe } from "../../features/auth/useAuth";
 
 export function SubmitPage() {
@@ -40,6 +40,12 @@ export function SubmitPage() {
             </p>
             <a
               href={loginUrl("/submit")}
+              onClick={(e) => {
+                if (window.top && window.top !== window.self) {
+                  e.preventDefault();
+                  navigateToLogin("/submit");
+                }
+              }}
               className="mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-[#ebecf0] px-4 text-sm font-medium text-[#0d0d0f] transition-colors hover:bg-white focus-ring"
             >
               <Github size={16} />
