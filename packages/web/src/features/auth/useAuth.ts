@@ -12,10 +12,15 @@ export function useMe() {
     retry: false,
   });
 
-  // Listen for popup OAuth completion signal
+  // Listen for popup OAuth completion signal — popup sends user data directly
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      if (e.data?.type === "ov-oauth-complete") {
+      if (e.data?.type === "ov-oauth-complete" && e.data.user) {
+        // Popup fetched /api/me in top-level context (cookie works there)
+        qc.setQueryData(["me"], e.data.user as MeResponse);
+        qc.invalidateQueries({ queryKey: ["owner-findings"] });
+      } else if (e.data?.type === "ov-oauth-complete") {
+        // Fallback: no user data, try refetch
         qc.invalidateQueries({ queryKey: ["me"] });
       }
     };

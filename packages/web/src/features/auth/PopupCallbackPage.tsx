@@ -1,29 +1,71 @@
-import { useEffect } from "react";
-import { CircleCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CircleCheck, Loader2 } from "lucide-react";
+import { apiUrl, type MeResponse } from "../../shared/api/client";
 
 /**
- * 弹窗 OAuth 完成页：授权后回调落在弹窗里展示。
- * postMessage 通知 opener + 2s 后尝试自动关闭（脚本打开的窗口可关）。
- * 注意：不能用 <script dangerouslySetInnerHTML>（innerHTML 注入的 script 不执行）。
+ * Popup OAuth completion page: after GitHub redirect, this page runs in the
+ * popup window (top-level, not iframe). It fetches /api/me from the API origin
+ * (cookie works here since it's a top-level request), then postMessages the
+ * result to the opener (iframe on huggingface.co where third-party cookies
+ * are blocked).
  */
 export function PopupCallbackPage() {
+  const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
+
   useEffect(() => {
-    if (window.opener) {
+    let closed = false;
+
+    async function complete() {
       try {
-        window.opener.postMessage({ type: "ov-oauth-complete" }, "*");
+        // This is a top-level window request — SameSite=None cookie IS sent
+        const res = await fetch(apiUrl("/api/me"), { credentials: "include" });
+        const data: MeResponse = await res.json();
+
+        if (!closed && window.opener) {
+          window.opener.postMessage(
+            { type: "ov-oauth-complete", user: data },
+            "*",
+          );
+        }
+        setStatus("done");
       } catch {
-        /* opener 不可达时忽略，原页面轮询兜底 */
+        setStatus("error");
+        // Still signal opener to try polling as fallback
+        if (!closed && window.opener) {
+          window.opener.postMessage({ type: "ov-oauth-complete" }, "*");
+        }
       }
+
+      // Auto-close after showing success
+      window.setTimeout(() => {
+        if (!closed) {
+          try { window.close(); } catch { /* noop */ }
+        }
+      }, 2000);
     }
-    const t = window.setTimeout(() => {
-      try {
-        window.close();
-      } catch {
-        /* 浏览器拒绝时由文案兜底 */
-      }
-    }, 2000);
-    return () => window.clearTimeout(t);
+
+    complete();
+    return () => { closed = true; };
   }, []);
+
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-surface px-8 text-center">
+        <Loader2 size={40} className="animate-spin text-accent-600" strokeWidth={1.6} />
+        <p className="mt-4 text-sm text-ink-secondary">Completing sign-in…</p>
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-surface px-8 text-center">
+        <p className="text-sm text-ink-secondary">
+          Sign-in may not have completed. You can close this tab.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-surface px-8 text-center">
