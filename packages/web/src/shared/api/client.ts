@@ -112,7 +112,7 @@ export function navigateToLogin(returnTo: string = currentReturnTo()): void {
   const url = loginUrl(returnTo);
   if (isEmbedded()) {
     // Must call window.open synchronously in click handler to avoid popup blocker
-    const popup = window.open(url, "ov-oauth", "width=600,height=700,noopener,noreferrer");
+    const popup = window.open(url, "ov-oauth", "width=600,height=700");
     if (!popup) {
       // Popup blocked — fall back to top navigation (may work on some platforms)
       if (window.top) window.top.location.href = url;
@@ -136,7 +136,7 @@ export function popupReturnTo(): string {
 /** Navigate to OAuth login in popup (for embedded/iframe context). */
 export function navigateToLoginPopup(): void {
   const url = loginUrl(popupReturnTo());
-  window.open(url, "ov-oauth", "width=600,height=700,noopener,noreferrer");
+  window.open(url, "ov-oauth", "width=600,height=700");
 }
 
 export interface OwnerFindingSummary {
