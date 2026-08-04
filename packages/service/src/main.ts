@@ -18,6 +18,9 @@ async function main(): Promise<void> {
   startScanLoops(config);
   startMailer(config);
 
+  // GitHub connectivity check (OAuth token exchange depends on github.com)
+  checkGithubConnectivity();
+
   const app = createApp(config);
 
   // HF Docker Space + containers: must bind 0.0.0.0 (entrypoint sets HOST)
@@ -42,3 +45,23 @@ main().catch((err) => {
   logger.fatal({ err }, "Failed to start");
   process.exit(1);
 });
+
+/** Warn if github.com is unreachable (OAuth login depends on it). */
+function checkGithubConnectivity(): void {
+  fetch("https://github.com", { method: "HEAD", signal: AbortSignal.timeout(10_000) })
+    .then((res) => {
+      if (res.ok || res.status === 405) {
+        logger.info("github.com reachable — OAuth OK");
+      } else {
+        logger.warn({ status: res.status }, "github.com unexpected status — OAuth may fail");
+      }
+    })
+    .catch((err) => {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        "⚠️ github.com UNREACHABLE — GitHub OAuth will fail! " +
+          "Update extra_hosts github.com IP in compose.prod.yml " +
+          "(check https://www.ipaddress.com/site/github.com)",
+      );
+    });
+}

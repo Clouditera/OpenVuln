@@ -44,6 +44,11 @@ services:
       VULNHUNTER_BASE_URL: ${VULNHUNTER_BASE_URL:-http://host.docker.internal:28080}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      # GitHub OAuth: pin IP to bypass GFW DNS pollution on China mainland servers.
+      # If github.com becomes unreachable, find a working IP:
+      #   dig +short github.com | head -1   (or check https://www.ipaddress.com/site/github.com)
+      #   curl -sS -o /dev/null -w '%{http_code}' --resolve github.com:443:<IP> https://github.com
+      - "github.com:140.82.116.4"
     networks:
       - openvuln
     # internal only — web proxies /api
