@@ -71,6 +71,7 @@ export function RepoSubmitForm({
     // 未登录 → 整页跳 GitHub OAuth，登录后回到当前页
     if (meQ.data && !meQ.data.authenticated) {
       navigateToLogin();
+      window.dispatchEvent(new Event("ov-oauth-popup-opened"));
       return;
     }
     setPending(true);

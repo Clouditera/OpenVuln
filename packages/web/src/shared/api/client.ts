@@ -76,7 +76,9 @@ export interface MeResponse {
 
 /** GitHub OAuth login URL (full-page redirect). */
 export function loginUrl(returnTo: string): string {
-  const safe = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
+  // 站内相对路径与白名单绝对地址（HF 部署回跳）都放行 —— 白名单校验在后端；
+  // 仅协议相对 "//…" 一律拒绝（开放重定向的唯一真风险）。
+  const safe = returnTo.startsWith("//") ? "/" : returnTo;
   return apiUrl(`/api/auth/github/login?return_to=${encodeURIComponent(safe)}`);
 }
 

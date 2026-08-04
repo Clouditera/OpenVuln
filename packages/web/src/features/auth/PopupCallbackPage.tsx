@@ -1,44 +1,37 @@
+import { useEffect } from "react";
+import { CircleCheck } from "lucide-react";
+
 /**
- * Popup OAuth callback: shown in the popup window after GitHub redirect.
- * Displays "Login successful, you can close this tab" and signals the opener.
+ * 弹窗 OAuth 完成页：授权后回调落在弹窗里展示。
+ * postMessage 通知 opener + 2s 后尝试自动关闭（脚本打开的窗口可关）。
+ * 注意：不能用 <script dangerouslySetInnerHTML>（innerHTML 注入的 script 不执行）。
  */
 export function PopupCallbackPage() {
+  useEffect(() => {
+    if (window.opener) {
+      try {
+        window.opener.postMessage({ type: "ov-oauth-complete" }, "*");
+      } catch {
+        /* opener 不可达时忽略，原页面轮询兜底 */
+      }
+    }
+    const t = window.setTimeout(() => {
+      try {
+        window.close();
+      } catch {
+        /* 浏览器拒绝时由文案兜底 */
+      }
+    }, 2000);
+    return () => window.clearTimeout(t);
+  }, []);
+
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "100vh",
-        background: "#000",
-        color: "#f0f2f6",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        textAlign: "center",
-        padding: "2rem",
-      }}
-    >
-      <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>✅</div>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.5rem" }}>
-        Login successful
-      </h1>
-      <p style={{ color: "#acacb0", fontSize: "0.95rem" }}>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-surface px-8 text-center">
+      <CircleCheck size={44} className="text-success" strokeWidth={1.6} />
+      <h1 className="mt-4 font-display text-xl font-semibold text-ink">Sign-in complete</h1>
+      <p className="mt-2 text-sm text-ink-secondary">
         You can close this tab and return to OpenVuln.
       </p>
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `
-            // Signal opener window to refresh login state
-            if (window.opener) {
-              window.opener.postMessage({ type: "ov-oauth-complete" }, "*");
-            }
-            // Auto-close after 2s if opener still open
-            setTimeout(function() {
-              try { window.close(); } catch(e) {}
-            }, 2000);
-          `,
-        }}
-      />
     </div>
   );
 }

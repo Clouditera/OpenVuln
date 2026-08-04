@@ -44,6 +44,7 @@ export function SubmitPage() {
                 if (window.top && window.top !== window.self) {
                   e.preventDefault();
                   navigateToLogin("/submit");
+                  window.dispatchEvent(new Event("ov-oauth-popup-opened"));
                 }
               }}
               className="mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-[#ebecf0] px-4 text-sm font-medium text-[#0d0d0f] transition-colors hover:bg-white focus-ring"
