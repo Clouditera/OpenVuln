@@ -42,7 +42,14 @@ export type DisclosureState = "owner_only" | "disclosed";
  * Includes `pending`: real VH deep-judge findings stay pending until optional
  * PoC verification; public metrics count "found", not only PoC-confirmed.
  */
-export const POC_STATUS_INGEST = ["confirmed", "not-needed", "unknown", "pending"] as const;
+/** `reproduced` = VH deep-judge confirmed PoC (alias of confirmed). */
+export const POC_STATUS_INGEST = [
+  "confirmed",
+  "reproduced",
+  "not-needed",
+  "unknown",
+  "pending",
+] as const;
 export type PocStatusIngest = (typeof POC_STATUS_INGEST)[number];
 
 export function isIngestiblePocStatus(s: string | null | undefined): boolean {

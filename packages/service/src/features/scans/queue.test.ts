@@ -40,6 +40,7 @@ describe("shouldIngestFinding", () => {
 
   it("accepts finding + confirmed/not-needed/unknown/pending", () => {
     expect(ok({ key: "a", item_type: "finding", poc_status: "confirmed" }, null)).toBe(true);
+    expect(ok({ key: "a", item_type: "finding", poc_status: "reproduced" }, null)).toBe(true);
     expect(ok({ key: "a", item_type: "finding", poc_status: "not-needed" }, null)).toBe(true);
     expect(ok({ key: "a", item_type: "finding", poc_status: "unknown" }, null)).toBe(true);
     expect(ok({ key: "a", item_type: "finding", poc_status: "pending" }, null)).toBe(true);

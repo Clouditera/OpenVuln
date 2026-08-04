@@ -23,10 +23,38 @@ function buildTransport(cfg: ServiceConfig): Transporter | null {
   });
 }
 
-function renderEmail(p: ScanCompletedPayload, base: string): { subject: string; text: string } {
+function normalizePayload(raw: unknown): ScanCompletedPayload {
+  let p = raw as ScanCompletedPayload | string;
+  if (typeof p === "string") {
+    try {
+      p = JSON.parse(p) as ScanCompletedPayload;
+    } catch {
+      p = {} as ScanCompletedPayload;
+    }
+  }
+  const counts = p.counts ?? { critical: 0, high: 0, medium: 0, low: 0 };
+  return {
+    project_id: p.project_id ?? "",
+    full_name: p.full_name ?? "unknown",
+    owner_login: p.owner_login ?? (p.full_name?.split("/")[0] || "unknown"),
+    name: p.name ?? (p.full_name?.split("/")[1] || "unknown"),
+    scan_job_id: p.scan_job_id ?? "",
+    counts: {
+      critical: Number(counts.critical ?? 0),
+      high: Number(counts.high ?? 0),
+      medium: Number(counts.medium ?? 0),
+      low: Number(counts.low ?? 0),
+    },
+    no_value: Boolean(p.no_value),
+  };
+}
+
+function renderEmail(raw: ScanCompletedPayload, base: string): { subject: string; text: string } {
+  const p = normalizePayload(raw);
   const c = p.counts;
   const total = (c.critical ?? 0) + (c.high ?? 0) + (c.medium ?? 0) + (c.low ?? 0);
   const link = `${base.replace(/\/$/, "")}/p/${p.owner_login}/${p.name}`;
+
   if (p.no_value || total === 0) {
     return {
       subject: `[OpenVuln] ${p.full_name} scan completed — 0 findings`,

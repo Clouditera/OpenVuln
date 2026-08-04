@@ -48,12 +48,13 @@ export async function insertScanCompleted(
     no_value: input.noValue,
   };
 
+  // Pass plain object — postgres.js encodes jsonb. Do NOT JSON.stringify (double-encode).
   await sql`
     INSERT INTO notifications (github_user_id, type, payload)
     VALUES (
       ${Number(p.submitted_by)},
       'scan_completed',
-      ${JSON.stringify(payload)}::jsonb
+      ${payload as never}
     )
   `;
 }

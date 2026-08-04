@@ -584,8 +584,9 @@ async function syncCompletedFindings(
       (typeof meta.primary_file === "string" && meta.primary_file) ||
       (typeof detailObj.primary_file === "string" && detailObj.primary_file) ||
       null;
-    const pocStatus =
+    let pocStatus =
       pickString(meta.poc_status, detailObj.poc_status, detailObj.pocStatus) ?? "unknown";
+    if (pocStatus.toLowerCase() === "reproduced") pocStatus = "confirmed";
     const itemType =
       pickString(meta.item_type, detailObj.item_type, detailObj.itemType) ?? "finding";
 
@@ -750,7 +751,10 @@ export async function adminResyncScanJob(
 ): Promise<{ ok: true; publicCount: number } | { ok: false; reason: string; vhState?: string }> {
   const job = await storage.getScanJob(jobId);
   if (!job) return { ok: false, reason: "not_found" };
-  if (job.state !== "failed") return { ok: false, reason: "not_failed", vhState: job.state };
+  // Allow failed + completed (re-pull plaintext / recover empty sync)
+  if (job.state !== "failed" && job.state !== "completed") {
+    return { ok: false, reason: "not_resyncable", vhState: job.state };
+  }
   if (!job.vulnhunter_task_id) return { ok: false, reason: "no_vh_task" };
 
   const vh = getVulnHunterClient();
@@ -766,8 +770,10 @@ export async function adminResyncScanJob(
     return { ok: false, reason: "vh_not_completed", vhState: state };
   }
 
-  // revive so concurrent poller doesn't double-mark; sync is idempotent via txn
-  await storage.reviveFailedForResync(job.id);
+  // failed jobs: revive scanning flag; completed: syncCompletedFindings re-marks completed
+  if (job.state === "failed") {
+    await storage.reviveFailedForResync(job.id);
+  }
   const publicCount = await syncCompletedFindings(job.id, job.project_id, job.vulnhunter_task_id);
   logger.info({ jobId: job.id, publicCount }, "Admin resync completed");
   return { ok: true, publicCount };
