@@ -70,7 +70,7 @@ export function RepoSubmitForm({
     }
     // 未登录 → 整页跳 GitHub OAuth，登录后回到当前页
     if (meQ.data && !meQ.data.authenticated) {
-      navigateToLogin(window.location.pathname + window.location.search);
+      navigateToLogin();
       return;
     }
     setPending(true);
