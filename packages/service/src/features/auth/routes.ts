@@ -74,13 +74,11 @@ authRouter.get("/github/callback", async (c) => {
   });
 
   // Cross-origin: SameSite=None+Secure so HF-space pages can send cookie
-  const origin = c.req.header("origin");
-  const crossOrigin = origin && cfg.corsAllowedOrigins.includes(origin);
   setCookie(c, COOKIE, rawId, {
     path: "/",
     httpOnly: true,
     secure: true,
-    sameSite: crossOrigin ? "None" : "Lax",
+    sameSite: "None",
     expires: expiresAt,
   });
   return c.redirect(verified.returnTo);
@@ -89,13 +87,10 @@ authRouter.get("/github/callback", async (c) => {
 authRouter.post("/logout", async (c) => {
   const raw = getCookie(c, COOKIE);
   if (raw) await storage.deleteSessionByRawId(raw);
-  const cfg = c.get("config") as ServiceConfig;
-  const origin = c.req.header("origin");
-  const crossOrigin = origin && cfg.corsAllowedOrigins.includes(origin);
   deleteCookie(c, COOKIE, {
     path: "/",
     secure: true,
-    sameSite: crossOrigin ? "None" : "Lax",
+    sameSite: "None",
   });
   return c.json({ ok: true });
 });
