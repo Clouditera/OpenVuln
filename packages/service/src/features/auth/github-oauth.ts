@@ -2,30 +2,55 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ServiceConfig } from "../../infra/config.js";
 import { logger } from "../../infra/logger.js";
 
+/** Structured OAuth error with human-readable message for callback rendering. */
+export class OAuthError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "OAuthError";
+  }
+}
+
 export async function exchangeCodeForToken(
   code: string,
   cfg: ServiceConfig,
 ): Promise<string> {
-  const res = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-      "user-agent": "OpenVuln",
-    },
-    body: JSON.stringify({
-      client_id: cfg.githubOAuth.clientId,
-      client_secret: cfg.githubOAuth.clientSecret,
-      code,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "user-agent": "OpenVuln",
+      },
+      body: JSON.stringify({
+        client_id: cfg.githubOAuth.clientId,
+        client_secret: cfg.githubOAuth.clientSecret,
+        code,
+      }),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "OAuth: cannot connect to github.com");
+    throw new OAuthError(
+      "github_unreachable",
+      "Cannot connect to github.com — the server may be blocked by a firewall. Contact the administrator.",
+    );
+  }
   if (!res.ok) {
     const t = await res.text().catch(() => "");
-    throw new Error(`GitHub token exchange failed: ${res.status} ${t.slice(0, 200)}`);
+    logger.error({ status: res.status, body: t.slice(0, 200) }, "OAuth token exchange HTTP error");
+    throw new OAuthError("token_exchange_failed", `GitHub token exchange failed (${res.status}).`);
   }
-  const data = (await res.json()) as { access_token?: string; error?: string };
+  const data = (await res.json()) as { access_token?: string; error?: string; error_description?: string };
   if (!data.access_token) {
-    throw new Error(`GitHub token exchange error: ${data.error ?? "no_token"}`);
+    if (data.error === "bad_verification_code") {
+      throw new OAuthError("expired_code", "Authorization code expired or already used. Please try signing in again.");
+    }
+    throw new OAuthError("token_exchange_failed", `GitHub returned: ${data.error_description ?? data.error ?? "no token"}`);
   }
   return data.access_token;
 }
