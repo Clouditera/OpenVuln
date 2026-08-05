@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Github, LogOut, ChevronDown, FolderGit2 } from "lucide-react";
-import { navigateToLogin, navigateToLoginPopup, isEmbedded } from "../shared/api/client";
+import { navigateToLogin, navigateToLoginPopup, isEmbedded, currentReturnTo } from "../shared/api/client";
 import { useLogout, useMe } from "../features/auth/useAuth";
 
 /**
@@ -47,7 +47,7 @@ export function AuthButton({ appearance = "light" }: { appearance?: "light" | "d
             navigateToLoginPopup();
             window.dispatchEvent(new Event("ov-oauth-popup-opened"));
           } else {
-            navigateToLogin(pathname + search);
+            navigateToLogin(currentReturnTo());
           }
         }}
         className={
