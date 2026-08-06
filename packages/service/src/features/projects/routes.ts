@@ -117,7 +117,8 @@ projectsRouter.get("/:projectId/findings", requireAuth, async (c) => {
     Number(project.github_repo_id),
     c.get("config"),
   );
-  const findings = await findingsStorage.listAllForOwner(projectId);
+  const scanJobId = c.req.query("scan_job_id") ?? undefined;
+  const findings = await findingsStorage.listAllForOwner(projectId, scanJobId);
   return c.json({ project_id: projectId, findings });
 });
 
@@ -139,7 +140,8 @@ projectsRouter.get("/:projectId/findings/:key", requireAuth, async (c) => {
     Number(project.github_repo_id),
     c.get("config"),
   );
-  const findings = await findingsStorage.listAllForOwner(projectId);
+  const scanJobId = c.req.query("scan_job_id") ?? undefined;
+  const findings = await findingsStorage.listAllForOwner(projectId, scanJobId);
   const finding = findings.find((f) => f.finding_key === key || f.id === key);
   if (!finding) throw new AppError("ERR_NOT_FOUND", { resource: "finding" });
   const artifacts = await listArtifactsForFinding(finding.id);
@@ -227,7 +229,8 @@ projectsRouter.get("/:projectId/report-full", requireAuth, async (c) => {
     c.get("config"),
   );
   const format = (c.req.query("format") ?? "md").toLowerCase();
-  const findings = await findingsStorage.listAllForOwner(projectId);
+  const scanJobId = c.req.query("scan_job_id") ?? undefined;
+  const findings = await findingsStorage.listAllForOwner(projectId, scanJobId);
   if (format === "json") {
     return c.json({
       project: { id: project.id, full_name: project.full_name },

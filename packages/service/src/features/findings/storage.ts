@@ -332,7 +332,7 @@ export async function listDisclosedSummaries(projectId: string): Promise<
 }
 
 /** Owner view: all findings on current scan (including owner_only). */
-export async function listAllForOwner(projectId: string): Promise<
+export async function listAllForOwner(projectId: string, scanJobId?: string): Promise<
   Array<{
     id: string;
     finding_key: string;
@@ -348,14 +348,18 @@ export async function listAllForOwner(projectId: string): Promise<
   }>
 > {
   const db = getDb();
+  const jobFilter = scanJobId
+    ? db`AND f.scan_job_id = ${scanJobId}::uuid`
+    : db`AND p.current_scan_job_id = f.scan_job_id`;
   const rows = await db`
     SELECT f.id::text, f.finding_key, f.severity, COALESCE(f.title, f.disclosed_title, f.finding_key) AS title,
            f.cwe, f.primary_file, f.disclosure_state, f.detail_json,
            f.disclosed_report_yaml, f.cvss_score, f.poc_status
     FROM findings f
-    JOIN projects p ON p.id = f.project_id AND p.current_scan_job_id = f.scan_job_id
+    JOIN projects p ON p.id = f.project_id
     WHERE f.project_id = ${projectId}::uuid
       AND f.severity IN ('critical', 'high', 'medium', 'low')
+      ${jobFilter}
     ORDER BY
       CASE f.severity
         WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4
