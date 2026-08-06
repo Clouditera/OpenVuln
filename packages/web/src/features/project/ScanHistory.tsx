@@ -64,7 +64,7 @@ export function ScanHistory({
   const currentId = scans.find((s) => s.state === "completed")?.id ?? null;
 
   return (
-    <section className="rounded-xl border border-line bg-surface-raised p-4">
+    <section className="rounded-xl border border-line bg-surface-raised px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-display text-sm font-semibold text-ink">
           Scan history ({scans.length})
@@ -109,7 +109,7 @@ export function ScanHistory({
             <li
               key={s.id}
               onClick={viewable ? () => onSelect(s.id === currentId ? null : s) : undefined}
-              className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2.5 text-[13px] transition-colors ${
+              className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 text-[13px] transition-colors ${
                 viewable ? "cursor-pointer hover:bg-surface-sunken" : ""
               } ${isSelected ? "bg-surface-sunken" : ""}`}
               title={viewable ? "View findings of this version" : undefined}

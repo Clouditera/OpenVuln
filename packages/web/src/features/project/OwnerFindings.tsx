@@ -87,14 +87,9 @@ export function OwnerFindings({
     <div className="space-y-4">
       {/* 工具行 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h2 className="font-display text-base font-semibold text-ink">
-            All findings ({findings.length})
-          </h2>
-          <span className="inline-flex items-center gap-1 rounded-full bg-accent-50 px-2 py-0.5 text-[11px] font-medium text-accent-700">
-            <Lock size={11} /> Owner only
-          </span>
-        </div>
+        <h2 className="font-display text-base font-semibold text-ink">
+          All findings ({findings.length})
+        </h2>
         <a
           href={apiUrl(`/api/projects/${projectId}/report-full?format=md${viewJob ? `&scan_job_id=${viewJob.id}` : ""}`)}
           className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-surface-raised px-3.5 text-sm font-medium text-ink transition-colors hover:bg-surface-sunken focus-ring"
@@ -152,9 +147,6 @@ export function OwnerFindings({
             {selected.size > 0 ? `${selected.size} selected` : ""}
           </span>
           <div className="ml-auto flex items-center gap-3">
-            <span className="hidden text-[12px] text-ink-tertiary sm:inline">
-              Permanent · applies to the current scan version · full report goes public.
-            </span>
             <Button
               size="md"
               disabled={selected.size === 0}
@@ -209,7 +201,7 @@ export function OwnerFindings({
                     }
                   }}
                   aria-expanded={open}
-                  className="flex w-full cursor-pointer items-start gap-3 px-5 py-4 text-left transition-colors hover:bg-surface-sunken/50 focus-ring"
+                  className="flex w-full cursor-pointer items-start gap-3 px-5 py-3 text-left transition-colors hover:bg-surface-sunken/50 focus-ring"
                 >
                   <input
                     type="checkbox"
@@ -235,12 +227,12 @@ export function OwnerFindings({
                       )}
                     </div>
                     <h3
-                      className="mt-1.5 line-clamp-2 font-display text-[15px] font-semibold leading-snug text-ink"
+                      className="mt-1 line-clamp-2 font-display text-[15px] font-semibold leading-snug text-ink"
                       title={f.title}
                     >
                       {f.title}
                     </h3>
-                    <p className="mt-1 truncate font-mono text-[11px] text-ink-tertiary">
+                    <p className="mt-0.5 truncate font-mono text-[11px] text-ink-tertiary">
                       {f.finding_key}
                     </p>
                   </div>
