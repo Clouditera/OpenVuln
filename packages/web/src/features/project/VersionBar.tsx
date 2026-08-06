@@ -87,11 +87,6 @@ export function VersionBar({
         >
           <CircleCheck size={13} className="text-success" />
           <span className="font-mono text-[12px]">{viewing?.label ?? "—"}</span>
-          {viewJob === null && current && (
-            <span className="rounded-full bg-accent-50 px-1.5 py-px text-[10px] font-medium text-accent-600">
-              current
-            </span>
-          )}
           <ChevronDown size={13} className={`text-ink-tertiary transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
 
@@ -120,11 +115,6 @@ export function VersionBar({
                       <span className="font-mono text-[12px] text-ink">
                         {s.commit_sha ? shortSha(s.commit_sha) : "—"}
                       </span>
-                      {isCurrent && (
-                        <span className="rounded-full bg-accent-50 px-1.5 py-px text-[10px] font-medium text-accent-600">
-                          current
-                        </span>
-                      )}
                       <span className="text-[12px] text-ink-tertiary">{s.findings_so_far} findings</span>
                       <span className="ml-auto font-mono text-[11px] text-ink-tertiary">
                         {formatRelativeTime(s.created_at)}
