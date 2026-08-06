@@ -158,12 +158,7 @@ export function ProjectPage() {
         </div>
         {isOwner && (
           <div className="mt-3">
-            <VersionBar
-              projectId={project.id}
-              htmlUrl={project.html_url}
-              viewJob={viewJob}
-              onViewJob={setViewJob}
-            />
+            <VersionBar projectId={project.id} viewJob={viewJob} onViewJob={setViewJob} />
           </div>
         )}
       </div>

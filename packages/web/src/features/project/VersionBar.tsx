@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, ChevronDown, CircleCheck, LoaderCircle, RefreshCw } from "lucide-react";
+import { Ban, ChevronDown, CircleCheck, LoaderCircle } from "lucide-react";
 import { api, type ScanJobSummary } from "../../shared/api/client";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { formatRelativeTime, shortSha } from "../../shared/lib/format";
@@ -16,12 +16,10 @@ export interface ViewJob {
  */
 export function VersionBar({
   projectId,
-  htmlUrl,
   viewJob,
   onViewJob,
 }: {
   projectId: string;
-  htmlUrl: string;
   viewJob: ViewJob | null;
   onViewJob: (v: ViewJob | null) => void;
 }) {
@@ -62,10 +60,6 @@ export function VersionBar({
     void qc.invalidateQueries({ queryKey: ["owner-findings", projectId] });
   };
 
-  const rescanM = useMutation({
-    mutationFn: () => api.submitProject({ git_url: htmlUrl }),
-    onSettled: invalidateAll,
-  });
   const cancelM = useMutation({
     mutationFn: (jobId: string) => api.cancelScanJob(projectId, jobId),
     onSettled: () => {
@@ -167,18 +161,6 @@ export function VersionBar({
           )}
         </span>
       )}
-
-      {/* Rescan */}
-      <button
-        type="button"
-        onClick={() => rescanM.mutate()}
-        disabled={rescanM.isPending || !!inflight}
-        title={inflight ? "A scan is already in progress" : "Scan the latest default-branch commit"}
-        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface-raised px-3 text-[12px] text-ink-secondary transition-colors hover:border-[#484a58] hover:text-ink focus-ring disabled:opacity-50"
-      >
-        {rescanM.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-        Rescan latest
-      </button>
 
       <ConfirmDialog
         open={cancelTarget !== null}
