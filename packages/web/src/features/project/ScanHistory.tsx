@@ -10,9 +10,14 @@ import { formatRelativeTime, shortSha } from "../../shared/lib/format";
 export function ScanHistory({
   projectId,
   htmlUrl,
+  selectedId,
+  onSelect,
 }: {
   projectId: string;
   htmlUrl: string;
+  /** 正在查看明细的版本（null=当前版本）。completed 行可点击切换。 */
+  selectedId: string | null;
+  onSelect: (job: ScanJobSummary | null) => void;
 }) {
   const qc = useQueryClient();
   const [cancelTarget, setCancelTarget] = useState<ScanJobSummary | null>(null);
@@ -56,6 +61,7 @@ export function ScanHistory({
 
   const scans = scansQ.data?.scans ?? [];
   const inflight = scans.filter((s) => ["queued", "dispatching", "scanning"].includes(s.state));
+  const currentId = scans.find((s) => s.state === "completed")?.id ?? null;
 
   return (
     <section className="rounded-xl border border-line bg-surface-raised p-4">
@@ -97,12 +103,26 @@ export function ScanHistory({
       <ul className="mt-3 divide-y divide-line">
         {scans.map((s) => {
           const cancellable = s.state === "queued" || s.state === "scanning";
+          const viewable = s.state === "completed";
+          const isSelected = (selectedId ?? currentId) === s.id;
           return (
-            <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-[13px]">
+            <li
+              key={s.id}
+              onClick={viewable ? () => onSelect(s.id === currentId ? null : s) : undefined}
+              className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2.5 text-[13px] transition-colors ${
+                viewable ? "cursor-pointer hover:bg-surface-sunken" : ""
+              } ${isSelected ? "bg-surface-sunken" : ""}`}
+              title={viewable ? "View findings of this version" : undefined}
+            >
               <ScanStateChip state={s.state} />
               <span className="font-mono text-[12px] text-ink">
                 {s.commit_sha ? shortSha(s.commit_sha) : "—"}
               </span>
+              {s.id === currentId && (
+                <span className="rounded-full bg-accent-50 px-1.5 py-px text-[10px] font-medium text-accent-600">
+                  current
+                </span>
+              )}
               {s.git_ref && (
                 <span className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary">
                   {s.git_ref}

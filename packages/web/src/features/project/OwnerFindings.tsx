@@ -27,17 +27,29 @@ import { ScanHistory } from "./ScanHistory";
 export function OwnerFindings({
   projectId,
   htmlUrl,
-  findings,
+  currentFindings,
 }: {
   projectId: string;
   htmlUrl: string;
-  findings: OwnerFindingSummary[];
+  /** 父级 access probe 已拉的当前版本 findings（兼作 current 的 initialData）。 */
+  currentFindings: OwnerFindingSummary[];
 }) {
   const qc = useQueryClient();
+  const [viewJob, setViewJob] = useState<{ id: string; label: string } | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+
+  // 版本化查询：viewJob=null → 当前版本
+  const findingsQ = useQuery({
+    queryKey: ["owner-findings", projectId, viewJob?.id ?? "current"],
+    queryFn: () => api.ownerFindings(projectId, viewJob?.id),
+    initialData: viewJob === null ? { project_id: projectId, findings: currentFindings } : undefined,
+    retry: false,
+  });
+  const findings = findingsQ.data?.findings ?? currentFindings;
+  const viewingHistorical = viewJob !== null;
 
   const disclosable = useMemo(
     () => findings.filter((f) => f.disclosure_state !== "disclosed"),
@@ -84,7 +96,7 @@ export function OwnerFindings({
           </span>
         </div>
         <a
-          href={apiUrl(`/api/projects/${projectId}/report-full?format=md`)}
+          href={apiUrl(`/api/projects/${projectId}/report-full?format=md${viewJob ? `&scan_job_id=${viewJob.id}` : ""}`)}
           className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-surface-raised px-3.5 text-sm font-medium text-ink transition-colors hover:bg-surface-sunken focus-ring"
           title="Download the complete report for all findings (markdown)"
         >
@@ -93,10 +105,39 @@ export function OwnerFindings({
       </div>
 
       {/* 版本扫描历史 + Rescan/Cancel（task-60217366） */}
-      <ScanHistory projectId={projectId} htmlUrl={htmlUrl} />
+      <ScanHistory
+        projectId={projectId}
+        htmlUrl={htmlUrl}
+        selectedId={viewJob?.id ?? null}
+        onSelect={(job) => {
+          setViewJob(job ? { id: job.id, label: job.commit_sha?.slice(0, 7) ?? job.id.slice(0, 8) } : null);
+          setSelected(new Set());
+          setOpenKey(null);
+        }}
+      />
 
-      {/* 披露操作条 */}
-      {disclosable.length > 0 && (
+      {viewingHistorical && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-accent-200 bg-accent-50 px-4 py-2.5 text-[13px] text-accent-600">
+          <span>
+            Viewing version <span className="font-mono font-medium">{viewJob.label}</span> — disclosure is
+            only available on the current version.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setViewJob(null);
+              setSelected(new Set());
+              setOpenKey(null);
+            }}
+            className="shrink-0 font-medium underline underline-offset-2 hover:text-accent-700"
+          >
+            Back to current
+          </button>
+        </div>
+      )}
+
+      {/* 披露操作条（历史版本只读，披露仅当前版本） */}
+      {!viewingHistorical && disclosable.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-sunken/50 px-4 py-2.5">
           <label className="flex cursor-pointer items-center gap-2 text-[13px] text-ink-secondary">
             <input
@@ -173,7 +214,7 @@ export function OwnerFindings({
                   <input
                     type="checkbox"
                     checked={selected.has(f.id)}
-                    disabled={disclosed}
+                    disabled={disclosed || viewingHistorical}
                     onClick={(e) => e.stopPropagation()}
                     onChange={() => toggle(f.id)}
                     aria-label={disclosed ? `${f.finding_key} already disclosed` : `Select ${f.finding_key}`}

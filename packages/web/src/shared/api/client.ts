@@ -223,13 +223,13 @@ export const api = {
     }),
   me: () => request<MeResponse>("/api/me"),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
-  ownerFindings: (projectId: string) =>
+  ownerFindings: (projectId: string, scanJobId?: string) =>
     request<{ project_id: string; findings: OwnerFindingSummary[] }>(
-      `/api/projects/${projectId}/findings`,
+      `/api/projects/${projectId}/findings${scanJobId ? `?scan_job_id=${scanJobId}` : ""}`,
     ),
-  ownerFinding: (projectId: string, key: string) =>
+  ownerFinding: (projectId: string, key: string, scanJobId?: string) =>
     request<{ finding: OwnerFindingDetail }>(
-      `/api/projects/${projectId}/findings/${encodeURIComponent(key)}`,
+      `/api/projects/${projectId}/findings/${encodeURIComponent(key)}${scanJobId ? `?scan_job_id=${scanJobId}` : ""}`,
     ),
   ownerDisclose: (projectId: string, findingIds: string[]) =>
     request<{ disclosed_count: number }>(`/api/projects/${projectId}/disclose`, {
