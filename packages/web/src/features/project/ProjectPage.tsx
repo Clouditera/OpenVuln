@@ -21,6 +21,7 @@ import { ScanningSpinner, StatusBadge } from "../../components/StatusBadge";
 import { api, apiUrl } from "../../shared/api/client";
 import { useMe } from "../auth/useAuth";
 import { OwnerFindings } from "./OwnerFindings";
+import { VersionBar, type ViewJob } from "./VersionBar";
 import { formatDate, formatStars, shortSha, totalFindings } from "../../shared/lib/format";
 
 export function ProjectPage() {
@@ -55,8 +56,10 @@ export function ProjectPage() {
     staleTime: 30_000,
   });
   const isOwner = ownerQ.isSuccess;
-  const tab =
-    tabParam === "details" ? "details" : tabParam === "findings" && isOwner ? "findings" : "overview";
+  // 版本查看状态（fish No.1253：切换操作上移到头部）
+  const [viewJob, setViewJob] = useState<ViewJob | null>(null);
+  // Details 与 Manage findings 合并为 Findings（fish No.1252）；tab=details 兼容旧链接
+  const tab = tabParam === "findings" || tabParam === "details" ? "findings" : "overview";
   const cweMax = useMemo(() => {
     const list = project?.cwe_distribution ?? [];
     return Math.max(1, ...list.map((c) => c.count));
@@ -153,6 +156,16 @@ export function ProjectPage() {
           <span>·</span>
           <span>Added {formatDate(project.created_at)}</span>
         </div>
+        {isOwner && (
+          <div className="mt-3">
+            <VersionBar
+              projectId={project.id}
+              htmlUrl={project.html_url}
+              viewJob={viewJob}
+              onViewJob={setViewJob}
+            />
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -160,14 +173,9 @@ export function ProjectPage() {
         <TabButton active={tab === "overview"} onClick={() => setParams({})}>
           Overview
         </TabButton>
-        <TabButton active={tab === "details"} onClick={() => setParams({ tab: "details" })}>
-          Details
+        <TabButton active={tab === "findings"} onClick={() => setParams({ tab: "findings" })}>
+          Findings
         </TabButton>
-        {isOwner && (
-          <TabButton active={tab === "findings"} onClick={() => setParams({ tab: "findings" })}>
-            Manage findings
-          </TabButton>
-        )}
       </div>
 
       {tab === "overview" && (
@@ -343,7 +351,7 @@ export function ProjectPage() {
         </div>
       )}
 
-      {tab === "details" && (
+      {tab === "findings" && !isOwner && (
         <div className="space-y-4 py-6">
           {project.disclosed_findings.length === 0 ? (
             <div className="rounded-md border border-line bg-surface-raised p-6">
@@ -431,7 +439,12 @@ export function ProjectPage() {
 
       {tab === "findings" && isOwner && (
         <div className="py-6">
-          <OwnerFindings projectId={project.id} htmlUrl={project.html_url} currentFindings={ownerQ.data?.findings ?? []} />
+          <OwnerFindings
+            projectId={project.id}
+            currentFindings={ownerQ.data?.findings ?? []}
+            viewJob={viewJob}
+            onViewJob={setViewJob}
+          />
         </div>
       )}
     </div>

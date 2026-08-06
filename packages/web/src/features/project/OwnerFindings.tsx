@@ -18,7 +18,7 @@ import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ReportBody, type StructuredReport } from "../../components/ReportBody";
 import { SeverityChip } from "../../components/SeverityChip";
-import { ScanHistory } from "./ScanHistory";
+import type { ViewJob } from "./VersionBar";
 
 /**
  * Owner 专属「Manage findings」：全部 findings（含未披露）+ 勾选披露 + 全量报告下载。
@@ -26,16 +26,19 @@ import { ScanHistory } from "./ScanHistory";
  */
 export function OwnerFindings({
   projectId,
-  htmlUrl,
   currentFindings,
+  viewJob,
+  onViewJob,
 }: {
   projectId: string;
-  htmlUrl: string;
   /** 父级 access probe 已拉的当前版本 findings（兼作 current 的 initialData）。 */
   currentFindings: OwnerFindingSummary[];
+  /** 版本查看状态（页面级，头部 VersionBar 控制）。 */
+  viewJob: ViewJob | null;
+  onViewJob: (v: ViewJob | null) => void;
 }) {
   const qc = useQueryClient();
-  const [viewJob, setViewJob] = useState<{ id: string; label: string } | null>(null);
+  const setViewJob = onViewJob;
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -98,18 +101,6 @@ export function OwnerFindings({
           <Download size={14} /> Full report (.md)
         </a>
       </div>
-
-      {/* 版本扫描历史 + Rescan/Cancel（task-60217366） */}
-      <ScanHistory
-        projectId={projectId}
-        htmlUrl={htmlUrl}
-        selectedId={viewJob?.id ?? null}
-        onSelect={(job) => {
-          setViewJob(job ? { id: job.id, label: job.commit_sha?.slice(0, 7) ?? job.id.slice(0, 8) } : null);
-          setSelected(new Set());
-          setOpenKey(null);
-        }}
-      />
 
       {viewingHistorical && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-accent-200 bg-accent-50 px-4 py-2.5 text-[13px] text-accent-600">
