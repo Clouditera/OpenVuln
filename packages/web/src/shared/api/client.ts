@@ -1,6 +1,7 @@
 import type {
   DisclosureState,
   ProjectCard,
+  ScanJobState,
   OverviewStats,
   ProjectListResponse,
   ProjectPublicView,
@@ -191,6 +192,16 @@ export interface NotificationItem {
   created_at: string;
 }
 
+export interface ScanJobSummary {
+  id: string;
+  state: ScanJobState;
+  commit_sha: string | null;
+  git_ref: string | null;
+  findings_so_far: number;
+  created_at: string;
+  finished_at: string | null;
+}
+
 export const api = {
   overview: () => request<OverviewStats>("/api/stats/overview"),
   listProjects: (params?: { sort?: string; page?: number; page_size?: number }) => {
@@ -234,4 +245,11 @@ export const api = {
   markAllNotificationsRead: () =>
     request<void>("/api/notifications/read-all", { method: "POST" }),
   myProjects: () => request<{ projects: ProjectCard[] }>("/api/my/projects"),
+  projectScans: (projectId: string) =>
+    request<{ scans: ScanJobSummary[] }>(`/api/projects/${projectId}/scans`),
+  cancelScanJob: (projectId: string, jobId: string) =>
+    request<{ ok: true; state: string }>(
+      `/api/projects/${projectId}/scan-jobs/${jobId}/cancel`,
+      { method: "POST" },
+    ),
 };

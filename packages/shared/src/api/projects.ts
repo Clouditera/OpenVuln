@@ -90,6 +90,8 @@ export interface ProjectPublicView {
 
 export interface SubmitProjectRequest {
   git_url: string;
+  /** 可选版本：branch / tag / 完整 commit SHA（默认=默认分支 HEAD，提交时锁定）。 */
+  ref?: string;
 }
 
 export interface SubmitProjectResponse {

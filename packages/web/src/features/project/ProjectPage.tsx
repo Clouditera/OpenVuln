@@ -431,7 +431,7 @@ export function ProjectPage() {
 
       {tab === "findings" && isOwner && (
         <div className="py-6">
-          <OwnerFindings projectId={project.id} findings={ownerQ.data?.findings ?? []} />
+          <OwnerFindings projectId={project.id} htmlUrl={project.html_url} findings={ownerQ.data?.findings ?? []} />
         </div>
       )}
     </div>

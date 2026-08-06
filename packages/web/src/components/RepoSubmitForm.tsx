@@ -20,6 +20,9 @@ function mapError(err: unknown): string {
       "Only accounts with admin or maintain permission on this repository can submit it."
     );
   }
+  if (reason === "ref_not_found" || reason === "invalid_ref") {
+    return "That branch/tag/commit was not found in this repository.";
+  }
   if (reason === "invalid_github_url") {
     return "That doesn't look like a GitHub repository URL. Expected: https://github.com/owner/repo";
   }
@@ -54,6 +57,8 @@ export function RepoSubmitForm({
   const nav = useNavigate();
   const meQ = useMe();
   const [url, setUrl] = useState("");
+  const [ref, setRef] = useState("");
+  const [showRef, setShowRef] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -76,7 +81,7 @@ export function RepoSubmitForm({
     }
     setPending(true);
     try {
-      const res = await api.submitProject({ git_url });
+      const res = await api.submitProject({ git_url, ...(ref.trim() ? { ref: ref.trim() } : {}) });
       nav(`/p/${res.project.owner_login}/${res.project.name}`, {
         state: { justSubmitted: true },
       });
@@ -131,6 +136,28 @@ export function RepoSubmitForm({
           </button>
         </div>
 
+        <div className="mt-2.5 flex justify-center">
+          {showRef ? (
+            <input
+              type="text"
+              value={ref}
+              onChange={(e) => setRef(e.target.value)}
+              placeholder="Branch, tag, or commit SHA (optional)"
+              spellCheck={false}
+              className="h-8 w-72 rounded-full border border-[#333] bg-[#030303] px-3.5 font-mono text-xs text-[#f0f2f6] outline-none placeholder:text-[#696a70] focus:border-[#484a58]"
+              aria-label="Version to scan (branch, tag, or commit SHA)"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowRef(true)}
+              className="text-[11px] text-[#696a70] underline decoration-[#333] underline-offset-2 transition hover:text-[#acacb0]"
+            >
+              Scan a specific version
+            </button>
+          )}
+        </div>
+
         <div className="mt-3 flex min-h-5 items-start justify-center gap-1.5 text-center text-xs text-[#77787e]">
           {error ? (
             <span className="inline-flex items-start gap-1.5 text-[#ff9ca5]" role="alert">
@@ -164,6 +191,27 @@ export function RepoSubmitForm({
         <Button type="submit" size="lg" disabled={pending} className="rounded-lg shrink-0">
           {pending ? "Submitting…" : "Submit"}
         </Button>
+      </div>
+      <div className="mt-2">
+        {showRef ? (
+          <input
+            type="text"
+            value={ref}
+            onChange={(e) => setRef(e.target.value)}
+            placeholder="Branch, tag, or commit SHA (optional — default: default branch HEAD)"
+            spellCheck={false}
+            className="h-9 w-full rounded-md border border-line bg-surface-raised px-3 font-mono text-xs text-ink placeholder:text-ink-tertiary focus-ring"
+            aria-label="Version to scan (branch, tag, or commit SHA)"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowRef(true)}
+            className="text-[12px] text-ink-tertiary underline decoration-line underline-offset-2 transition-colors hover:text-ink-secondary"
+          >
+            Scan a specific version
+          </button>
+        )}
       </div>
       {error && (
         <p

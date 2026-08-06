@@ -18,6 +18,7 @@ import { Button } from "../../components/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ReportBody, type StructuredReport } from "../../components/ReportBody";
 import { SeverityChip } from "../../components/SeverityChip";
+import { ScanHistory } from "./ScanHistory";
 
 /**
  * Owner 专属「Manage findings」：全部 findings（含未披露）+ 勾选披露 + 全量报告下载。
@@ -25,9 +26,11 @@ import { SeverityChip } from "../../components/SeverityChip";
  */
 export function OwnerFindings({
   projectId,
+  htmlUrl,
   findings,
 }: {
   projectId: string;
+  htmlUrl: string;
   findings: OwnerFindingSummary[];
 }) {
   const qc = useQueryClient();
@@ -89,6 +92,9 @@ export function OwnerFindings({
         </a>
       </div>
 
+      {/* 版本扫描历史 + Rescan/Cancel（task-60217366） */}
+      <ScanHistory projectId={projectId} htmlUrl={htmlUrl} />
+
       {/* 披露操作条 */}
       {disclosable.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-sunken/50 px-4 py-2.5">
@@ -106,7 +112,7 @@ export function OwnerFindings({
           </span>
           <div className="ml-auto flex items-center gap-3">
             <span className="hidden text-[12px] text-ink-tertiary sm:inline">
-              Disclosure is permanent — full report content goes public.
+              Permanent · applies to the current scan version · full report goes public.
             </span>
             <Button
               size="md"
