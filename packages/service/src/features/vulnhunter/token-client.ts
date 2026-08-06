@@ -272,4 +272,15 @@ export class TokenVulnHunterClient implements VulnHunterClient {
       return false;
     }
   }
+
+  async deleteTask(taskId: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/tasks/${taskId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${this.apiToken}` },
+    });
+    if (!res.ok && res.status !== 404) {
+      const t = await res.text().catch(() => "");
+      throw new Error(`VH deleteTask ${res.status}: ${t.slice(0, 200)}`);
+    }
+  }
 }

@@ -121,4 +121,6 @@ export interface VulnHunterClient {
   /** Preview one artifact; path is task-relative (findings/…/poc/…). */
   getArtifactFilePreview(taskId: string, relPath: string): Promise<VhArtifactFilePreview | null>;
   healthCheck(): Promise<boolean>;
+  /** Delete/cancel a VH task. */
+  deleteTask(taskId: string): Promise<void>;
 }

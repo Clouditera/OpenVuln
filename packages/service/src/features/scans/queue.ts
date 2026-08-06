@@ -337,26 +337,29 @@ async function dispatchOnce(concurrency: number): Promise<void> {
 
       // Mock never hits real GitHub/VH upload; archive mode is for real TOKEN/cookie clients.
       if (cfg.vulnhunter.sourceMode === "archive") {
-        // Resolve HEAD SHA → pin zipball → multipart upload
+        // Use stored commit_sha (locked at submit time) — don't re-fetch HEAD
         const parsed =
           parseGitHubUrl(project.html_url) ??
           ({ owner: project.owner_login, repo: project.name } as const);
-        const branch = project.default_branch || "main";
-        const sha =
-          (await githubApi.fetchDefaultBranchHeadSha(
+        let sha = job.commit_sha;
+        if (!sha) {
+          // Fallback for legacy jobs without commit_sha
+          sha = await githubApi.fetchDefaultBranchHeadSha(
             parsed.owner,
             parsed.repo,
-            branch,
+            project.default_branch || "main",
             cfg.github.serverToken || undefined,
-          )) ?? branch;
-        await storage.setCommitSha(job.id, sha.length === 40 ? sha : null);
+          );
+          if (sha) await storage.setCommitSha(job.id, sha);
+        }
+        const refSha = sha ?? project.default_branch ?? "main";
 
         const maxBytes = Math.max(1, cfg.vulnhunter.zipMaxMb) * 1024 * 1024;
         try {
           const zip = await githubZipball.downloadGithubZipball({
             owner: parsed.owner,
             repo: parsed.repo,
-            ref: sha,
+            ref: refSha,
             maxBytes,
             token: cfg.github.serverToken || undefined,
             timeoutMs: cfg.vulnhunter.zipDownloadTimeoutMs,
@@ -632,31 +635,14 @@ async function syncCompletedFindings(
 
   const db = getDb();
   await db.begin(async (tx) => {
-    const priorDisclosure = await findingsStorage.listDisclosureByKey(projectId, tx);
-    // Snapshot disclosed_files before CASCADE delete of findings
-    type PriorFile = {
-      finding_key: string;
-      kind: string;
-      rel_path: string;
-      file_name: string;
-      content: string;
-    };
-    const priorFiles = (await tx`
-      SELECT f.finding_key, df.kind, df.rel_path, df.file_name, df.content
-      FROM disclosed_files df
-      JOIN findings f ON f.id = df.finding_id
-      WHERE df.project_id = ${projectId}::uuid
-    `) as unknown as PriorFile[];
-    const filesByKey = new Map<string, PriorFile[]>();
-    for (const f of priorFiles) {
-      const list = filesByKey.get(f.finding_key) ?? [];
-      list.push(f);
-      filesByKey.set(f.finding_key, list);
-    }
+    // Preserve disclosure state for THIS job's prior findings (same-job retry/resync).
+    // Do NOT inherit from other versions (fish rule ⑥: per-version disclosure).
+    const priorDisclosure = await findingsStorage.listDisclosureByKeyForJob(scanJobId, tx);
 
-    const removed = await findingsStorage.deleteAllForProject(projectId, tx);
+    // Delete only this job's prior findings (retry/resync idempotent).
+    const removed = await findingsStorage.deleteAllForJob(scanJobId, tx);
     if (removed > 0) {
-      logger.info({ projectId, scanJobId, removed }, "Cleared prior findings before resync");
+      logger.info({ projectId, scanJobId, removed }, "Cleared this job's prior findings before resync");
     }
 
     for (const row of prepared) {
@@ -675,9 +661,9 @@ async function syncCompletedFindings(
           encPayload: "",
           disclosureState: prev?.state,
           disclosedAt: prev?.disclosedAt ?? null,
-          disclosedTitle: prev?.disclosedTitle ?? row.title,
+          disclosedTitle: prev?.disclosedTitle ?? null,
           disclosedSummary: prev?.disclosedSummary ?? null,
-          disclosedReportYaml: prev?.disclosedReportYaml ?? row.reportYaml,
+          disclosedReportYaml: prev?.disclosedReportYaml ?? null,
           cvssScore: row.cvssScore,
           cvssVector: row.cvssVector,
           pocStatus: row.pocStatus,
@@ -686,22 +672,6 @@ async function syncCompletedFindings(
         },
         tx,
       );
-      // Restore disclosed_files under new finding id
-      const retained = filesByKey.get(row.findingKey) ?? [];
-      for (const file of retained) {
-        await tx`
-          INSERT INTO disclosed_files (finding_id, project_id, kind, rel_path, file_name, content)
-          VALUES (
-            ${row.id}::uuid,
-            ${projectId}::uuid,
-            ${file.kind},
-            ${file.rel_path},
-            ${file.file_name},
-            ${file.content}
-          )
-          ON CONFLICT (finding_id, rel_path) DO NOTHING
-        `;
-      }
     }
 
     await storage.updateFindingsSoFar(scanJobId, publicCount, tx);
@@ -777,6 +747,25 @@ export async function adminResyncScanJob(
   const publicCount = await syncCompletedFindings(job.id, job.project_id, job.vulnhunter_task_id);
   logger.info({ jobId: job.id, publicCount }, "Admin resync completed");
   return { ok: true, publicCount };
+}
+
+/** Cancel a scanning job by deleting its VH task (then mark cancelled). */
+export async function cancelScanJobVh(
+  jobId: string,
+  vhTaskId: string,
+): Promise<void> {
+  const vh = getVulnHunterClient();
+  try {
+    await vh.deleteTask(vhTaskId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // 404 / task_not_found = already deleted, acceptable
+    if (!msg.includes("not_found") && !msg.includes("404")) {
+      throw err;
+    }
+  }
+  await storage.markCancelled(jobId, "cancelled_by_user");
+  logger.info({ jobId, vhTaskId }, "Scan job cancelled (VH task deleted)");
 }
 
 export function startScanLoops(config: ServiceConfig): void {

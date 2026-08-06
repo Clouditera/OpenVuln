@@ -147,6 +147,7 @@ export async function submitProject(
   gitUrl: string,
   config: ServiceConfig,
   user: AuthUser,
+  ref?: string,
 ): Promise<SubmitProjectResponse> {
   const parsed = parseGitHubUrl(gitUrl);
   if (!parsed) {
@@ -171,7 +172,6 @@ export async function submitProject(
     });
   }
 
-  // If user submitted a fork, we register the upstream root (already resolved)
   void wasFork;
 
   // Maintainer/admin only + daily rate limit
@@ -185,34 +185,49 @@ export async function submitProject(
     });
   }
 
+  // Resolve version: ref or default branch HEAD → full SHA
+  const resolvedRef = ref?.trim() || meta.default_branch;
+  const commitSha = await fetchDefaultBranchHeadSha(
+    meta.owner.login,
+    meta.name,
+    resolvedRef,
+    config.github.serverToken,
+  );
+  if (!commitSha) {
+    throw new AppError("ERR_VALIDATION", {
+      field: "ref",
+      reason: "ref_not_found",
+      message: `Branch/tag/commit "${resolvedRef}" not found`,
+    });
+  }
+
   const existing = await storage.findByRepoId(meta.id);
   if (existing) {
-    const last = await scanStorage.lastScanCreatedAt(existing.id);
-    if (last) {
-      const cooldownMs = config.scan.cooldownDays * 24 * 60 * 60 * 1000;
-      const elapsed = Date.now() - last.getTime();
-      if (elapsed < cooldownMs) {
-        const retryAfterDays = Math.ceil((cooldownMs - elapsed) / (24 * 60 * 60 * 1000));
-        throw new AppError("ERR_CONFLICT", {
-          reason: "cooldown",
-          project_id: existing.id,
-          retry_after_days: retryAfterDays,
-          message: `Project already scanned. Retry after ${retryAfterDays} day(s).`,
-        });
-      }
+    // Idempotent: same version already completed → return existing result
+    const completed = await scanStorage.findCompletedBySha(existing.id, commitSha);
+    if (completed) {
+      const counts = await findingsStorage.severityCounts(existing.id);
+      return { project: await toCard(existing, counts) };
     }
-    // Cooldown passed — enqueue a new scan on existing project
-    const sha = await fetchDefaultBranchHeadSha(
-      meta.owner.login,
-      meta.name,
-      meta.default_branch,
-      config.github.serverToken,
-    );
-    await scanStorage.createScanJob(existing.id, sha);
+
+    // Single in-flight: any version scanning → 409
+    const inFlight = await scanStorage.findInFlight(existing.id);
+    if (inFlight) {
+      throw new AppError("ERR_CONFLICT", {
+        reason: "scan_in_progress",
+        job_id: inFlight.id,
+        state: inFlight.state,
+        message: `A scan is already in progress for this project (${inFlight.state}). Cancel it or wait for completion.`,
+      });
+    }
+
+    // New version scan
+    await scanStorage.createScanJob(existing.id, commitSha, resolvedRef);
     const counts = await findingsStorage.severityCounts(existing.id);
     return { project: await toCard(existing, counts) };
   }
 
+  // New project
   let project: ProjectRow;
   try {
     project = await storage.insertProject({
@@ -228,26 +243,24 @@ export async function submitProject(
       submittedBy: user.githubUserId,
     });
   } catch (err) {
-    // BUG-2: concurrent submit races past findByRepoId → unique_violation.
-    // Map to the same 409 cooldown/conflict path as sequential duplicates.
     if (!storage.isUniqueViolation(err)) throw err;
+    // Concurrent create — retry idempotent check
     const raced = await storage.findByRepoId(meta.id);
     if (!raced) throw err;
-    const last = await scanStorage.lastScanCreatedAt(raced.id);
-    if (last) {
-      const cooldownMs = config.scan.cooldownDays * 24 * 60 * 60 * 1000;
-      const elapsed = Date.now() - last.getTime();
-      if (elapsed < cooldownMs) {
-        const retryAfterDays = Math.ceil((cooldownMs - elapsed) / (24 * 60 * 60 * 1000));
-        throw new AppError("ERR_CONFLICT", {
-          reason: "cooldown",
-          project_id: raced.id,
-          retry_after_days: retryAfterDays,
-          message: `Project already scanned. Retry after ${retryAfterDays} day(s).`,
-        });
-      }
+    const completed = await scanStorage.findCompletedBySha(raced.id, commitSha);
+    if (completed) {
+      const counts = await findingsStorage.severityCounts(raced.id);
+      return { project: await toCard(raced, counts) };
     }
-    // Cooldown already passed on the winner — treat as conflict on the in-flight create.
+    const inFlight = await scanStorage.findInFlight(raced.id);
+    if (inFlight) {
+      throw new AppError("ERR_CONFLICT", {
+        reason: "scan_in_progress",
+        job_id: inFlight.id,
+        state: inFlight.state,
+        message: `A scan is already in progress for this project.`,
+      });
+    }
     throw new AppError("ERR_CONFLICT", {
       reason: "duplicate",
       project_id: raced.id,
@@ -255,13 +268,52 @@ export async function submitProject(
     });
   }
 
-  const sha = await fetchDefaultBranchHeadSha(
-    meta.owner.login,
-    meta.name,
-    meta.default_branch,
-    config.github.serverToken,
-  );
-  await scanStorage.createScanJob(project.id, sha);
-
+  await scanStorage.createScanJob(project.id, commitSha, resolvedRef);
   return { project: await toCard(project, emptyCounts()) };
+}
+
+/** Cancel a scan job (owner action). Queued → immediate; scanning → VH delete. */
+export async function cancelScanJob(
+  projectId: string,
+  jobId: string,
+): Promise<{ ok: true; state: string }> {
+  const job = await scanStorage.getScanJob(jobId);
+  if (!job || job.project_id !== projectId) {
+    throw new AppError("ERR_NOT_FOUND", { resource: "scan_job" });
+  }
+  if (job.state === "queued") {
+    const cancelled = await scanStorage.markCancelled(jobId, "cancelled_by_user");
+    return { ok: true, state: cancelled?.state ?? "cancelled" };
+  }
+  if (job.state === "dispatching") {
+    throw new AppError("ERR_CONFLICT", {
+      reason: "try_later",
+      message: "Job is being dispatched, please retry in a moment.",
+    });
+  }
+  if (job.state === "scanning") {
+    if (job.vulnhunter_task_id) {
+      try {
+        const { cancelScanJobVh } = await import("../scans/queue.js");
+        await cancelScanJobVh(jobId, job.vulnhunter_task_id);
+      } catch (err) {
+        // VH delete failed — still cancel locally if 404 (task already gone)
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes("not_found") && !msg.includes("404")) {
+          throw new AppError("ERR_UPSTREAM", {
+            reason: "vh_cancel_failed",
+            message: `Failed to cancel VulnHunter task: ${msg.slice(0, 200)}`,
+          });
+        }
+      }
+    }
+    const cancelled = await scanStorage.markCancelled(jobId, "cancelled_by_user");
+    return { ok: true, state: cancelled?.state ?? "cancelled" };
+  }
+  // Already terminal
+  throw new AppError("ERR_CONFLICT", {
+    reason: "already_terminal",
+    state: job.state,
+    message: `Job is already ${job.state}.`,
+  });
 }

@@ -23,11 +23,12 @@ type SqlLike = any;
 export async function createScanJob(
   projectId: string,
   commitSha: string | null,
+  gitRef: string | null = null,
 ): Promise<ScanJobRow> {
   const db = getDb();
   const rows = await db<ScanJobRow[]>`
-    INSERT INTO scan_jobs (project_id, state, commit_sha)
-    VALUES (${projectId}::uuid, 'queued', ${commitSha})
+    INSERT INTO scan_jobs (project_id, state, commit_sha, git_ref)
+    VALUES (${projectId}::uuid, 'queued', ${commitSha}, ${gitRef})
     RETURNING
       id::text, project_id::text, vulnhunter_task_id::text,
       state, commit_sha, attempt, fail_reason_internal,
@@ -361,4 +362,99 @@ export async function lastScanCreatedAt(projectId: string): Promise<Date | null>
     LIMIT 1
   `;
   return rows[0]?.created_at ?? null;
+}
+
+/** Find completed scan for a specific commit (idempotent check). */
+export async function findCompletedBySha(
+  projectId: string,
+  commitSha: string,
+): Promise<ScanJobRow | null> {
+  const db = getDb();
+  const rows = await db<ScanJobRow[]>`
+    SELECT
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+    FROM scan_jobs
+    WHERE project_id = ${projectId}::uuid
+      AND commit_sha = ${commitSha}
+      AND state = 'completed'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+/** Find any in-flight job for a project (any version). */
+export async function findInFlight(projectId: string): Promise<ScanJobRow | null> {
+  const db = getDb();
+  const rows = await db<ScanJobRow[]>`
+    SELECT
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+    FROM scan_jobs
+    WHERE project_id = ${projectId}::uuid
+      AND state IN ('queued', 'dispatching', 'scanning')
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+/** Mark job as cancelled (releases the partial unique index slot). */
+export async function markCancelled(id: string, reason: string | null = null): Promise<ScanJobRow | null> {
+  const db = getDb();
+  const rows = await db<ScanJobRow[]>`
+    UPDATE scan_jobs
+    SET state = 'cancelled',
+        fail_reason_internal = ${reason ? reason.slice(0, 2000) : 'cancelled_by_user'},
+        finished_at = now()
+    WHERE id = ${id}::uuid
+      AND state IN ('queued', 'dispatching', 'scanning')
+    RETURNING
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+  `;
+  return rows[0] ?? null;
+}
+
+/** List completed scans for a project (version history). */
+export async function listCompletedScans(projectId: string): Promise<ScanJobRow[]> {
+  const db = getDb();
+  return db<ScanJobRow[]>`
+    SELECT
+      j.id::text, j.project_id::text, j.vulnhunter_task_id::text,
+      j.state, j.commit_sha, j.attempt, j.fail_reason_internal,
+      COALESCE(j.findings_so_far, 0) AS findings_so_far,
+      COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
+      j.created_at, j.started_at, j.finished_at
+    FROM scan_jobs j
+    WHERE j.project_id = ${projectId}::uuid
+      AND j.state = 'completed'
+    ORDER BY j.created_at DESC
+  `;
+}
+
+/** List all scans for a project (owner view). */
+export async function listAllScans(projectId: string): Promise<ScanJobRow[]> {
+  const db = getDb();
+  return db<ScanJobRow[]>`
+    SELECT
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+    FROM scan_jobs
+    WHERE project_id = ${projectId}::uuid
+    ORDER BY created_at DESC
+  `;
 }

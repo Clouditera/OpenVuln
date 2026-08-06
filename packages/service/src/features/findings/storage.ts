@@ -82,6 +82,63 @@ export async function deleteAllForProject(
   return rows.length;
 }
 
+/** Same as listDisclosureByKey but filtered to a single scan_job (version-scoped). */
+export async function listDisclosureByKeyForJob(
+  scanJobId: string,
+  sql: SqlLike = getDb(),
+): Promise<
+  Map<
+    string,
+    {
+      state: DisclosureState;
+      disclosedAt: Date | null;
+      disclosedTitle: string | null;
+      disclosedSummary: string | null;
+      disclosedReportYaml: string | null;
+    }
+  >
+> {
+  const rows = await sql`
+    SELECT finding_key, disclosure_state, disclosed_at, disclosed_title, disclosed_summary,
+           disclosed_report_yaml
+    FROM findings
+    WHERE scan_job_id = ${scanJobId}::uuid AND disclosure_state = 'disclosed'
+  `;
+  const map = new Map<
+    string,
+    {
+      state: DisclosureState;
+      disclosedAt: Date | null;
+      disclosedTitle: string | null;
+      disclosedSummary: string | null;
+      disclosedReportYaml: string | null;
+    }
+  >();
+  for (const r of rows) {
+    map.set(r.finding_key, {
+      state: r.disclosure_state,
+      disclosedAt: r.disclosed_at,
+      disclosedTitle: r.disclosed_title,
+      disclosedSummary: r.disclosed_summary,
+      disclosedReportYaml: r.disclosed_report_yaml,
+    });
+  }
+  return map;
+}
+
+/** Delete findings for a specific scan job (version-scoped, doesn't touch other versions). */
+export async function deleteAllForJob(
+  scanJobId: string,
+  sql: SqlLike = getDb(),
+): Promise<number> {
+  const rows = await sql`
+    DELETE FROM findings
+    WHERE scan_job_id = ${scanJobId}::uuid
+    RETURNING id::text
+  `;
+  return rows.length;
+}
+
 export async function upsertEncryptedFinding(
   input: {
     id: string;

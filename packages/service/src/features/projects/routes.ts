@@ -5,6 +5,7 @@ import { requireRepoAccess } from "../auth/permission.js";
 import { findingsStorage } from "../findings/index.js";
 import { listArtifactsForFinding } from "../findings/artifacts-storage.js";
 import { parseReportYaml, renderReportYamlToMarkdown } from "../report/yaml-render.js";
+import { scanStorage } from "../scans/index.js";
 import * as service from "./service.js";
 import * as storage from "./storage.js";
 
@@ -20,6 +21,59 @@ projectsRouter.get("/mine", requireAuth, async (c) => {
     cards.push(await service.projectToCard(p));
   }
   return c.json({ projects: cards });
+});
+
+// Owner: cancel scan job
+projectsRouter.post("/:projectId/scan-jobs/:jobId/cancel", requireAuth, async (c) => {
+  const projectId = c.req.param("projectId");
+  const jobId = c.req.param("jobId");
+  if (!findingsStorage.isUuid(projectId) || !findingsStorage.isUuid(jobId)) {
+    throw new AppError("ERR_VALIDATION", { fields: ["projectId", "jobId"] });
+  }
+  const user = c.get("user");
+  if (!user) throw new AppError("ERR_UNAUTHORIZED", { reason: "login_required" });
+  const project = await storage.findById(projectId);
+  if (!project) throw new AppError("ERR_NOT_FOUND", { resource: "project" });
+  await requireRepoAccess(
+    user,
+    project.owner_login,
+    project.name,
+    Number(project.github_repo_id),
+    c.get("config"),
+  );
+  const result = await service.cancelScanJob(projectId, jobId);
+  return c.json(result);
+});
+
+// Owner: list scan history (all states)
+projectsRouter.get("/:projectId/scans", requireAuth, async (c) => {
+  const projectId = c.req.param("projectId");
+  if (!findingsStorage.isUuid(projectId)) {
+    throw new AppError("ERR_VALIDATION", { field: "projectId" });
+  }
+  const user = c.get("user");
+  if (!user) throw new AppError("ERR_UNAUTHORIZED", { reason: "login_required" });
+  const project = await storage.findById(projectId);
+  if (!project) throw new AppError("ERR_NOT_FOUND", { resource: "project" });
+  await requireRepoAccess(
+    user,
+    project.owner_login,
+    project.name,
+    Number(project.github_repo_id),
+    c.get("config"),
+  );
+  const scans = await scanStorage.listAllScans(projectId);
+  return c.json({
+    scans: scans.map((s) => ({
+      id: s.id,
+      state: s.state,
+      commit_sha: s.commit_sha,
+      git_ref: (s as unknown as Record<string, unknown>).git_ref ?? null,
+      findings_so_far: s.findings_so_far,
+      created_at: s.created_at.toISOString(),
+      finished_at: s.finished_at?.toISOString() ?? null,
+    })),
+  });
 });
 
 // GET /api/projects?sort=newest|stars&page=
@@ -41,7 +95,8 @@ projectsRouter.post("/", requireAuth, async (c) => {
   if (typeof gitUrl !== "string" || !gitUrl.trim()) {
     throw new AppError("ERR_VALIDATION", { field: "git_url" });
   }
-  const result = await service.submitProject(gitUrl.trim(), config, user);
+  const ref = typeof body?.ref === "string" ? body.ref.trim() : undefined;
+  const result = await service.submitProject(gitUrl.trim(), config, user, ref);
   return c.json(result, 201);
 });
 

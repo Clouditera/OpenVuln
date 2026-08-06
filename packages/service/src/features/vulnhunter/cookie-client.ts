@@ -242,4 +242,13 @@ export class CookieVulnHunterClient implements VulnHunterClient {
       return false;
     }
   }
+
+  async deleteTask(taskId: string): Promise<void> {
+    // Cookie-mode client: best-effort delete
+    try {
+      await fetch(`${this.baseUrl}/api/tasks/${taskId}`, { method: "DELETE" });
+    } catch {
+      // best-effort
+    }
+  }
 }
