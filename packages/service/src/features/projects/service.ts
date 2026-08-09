@@ -280,7 +280,7 @@ export async function cancelScanJob(
   if (!job || job.project_id !== projectId) {
     throw new AppError("ERR_NOT_FOUND", { resource: "scan_job" });
   }
-  if (job.state === "queued") {
+  if (job.state === "pending_review" || job.state === "queued") {
     const cancelled = await scanStorage.markCancelled(jobId, "cancelled_by_user");
     return { ok: true, state: cancelled?.state ?? "cancelled" };
   }
