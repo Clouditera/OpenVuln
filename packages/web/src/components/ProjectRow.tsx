@@ -84,21 +84,22 @@ export function ProjectRow({ project }: { project: ProjectCard }) {
                   </>
                 )}
               </div>
-              <div className="mt-2.5">
-                {scanning ? (
-                  <span className="text-[13px] font-medium text-running-ink">
-                    {soFar > 0 ? `Scanning · ${soFar} findings so far` : "Scanning…"}
-                  </span>
-                ) : waiting ? (
-                  <span className="text-[13px] text-ink-tertiary">In review</span>
-                ) : (
-                  <SeverityBar
-                    counts={project.severity_counts}
-                    showLegend
-                    legendClass="text-[11px]"
-                  />
-                )}
-              </div>
+              {/* waiting: status only on right badge (fish No.1684) — no duplicate In review under meta */}
+              {(scanning || !waiting) && (
+                <div className="mt-2.5">
+                  {scanning ? (
+                    <span className="text-[13px] font-medium text-running-ink">
+                      {soFar > 0 ? `Scanning · ${soFar} findings so far` : "Scanning…"}
+                    </span>
+                  ) : (
+                    <SeverityBar
+                      counts={project.severity_counts}
+                      showLegend
+                      legendClass="text-[11px]"
+                    />
+                  )}
+                </div>
+              )}
             </div>
             {/* completed 的扫描时间已在 meta 行，右侧 badge 只留给需要注意的状态（去重，fish v1.11） */}
             {state !== "completed" && (
