@@ -7,7 +7,7 @@ import { AppError } from "../../middleware/error-handler.js";
 import { findingsStorage } from "../findings/index.js";
 import { projectStorage } from "../projects/index.js";
 import { scanStorage } from "../scans/index.js";
-import { adminResyncScanJob, getScanConfigView, setRuntimeConcurrency } from "../scans/queue.js";
+import { adminResyncScanJob, setRuntimeConcurrency } from "../scans/queue.js";
 import { type ImportBody, importFindingsPackage } from "./import-run.js";
 
 export const adminRouter = new Hono();
@@ -298,30 +298,94 @@ adminRouter.post("/scan-jobs/:jobId/finalize", async (c) => {
 });
 
 /**
- * GET /api/admin/scan-config — current concurrency + source (override|env).
- * PUT /api/admin/scan-config {concurrency:1..16} — memory override (restart clears).
+ * GET /api/admin/scan-config — DB-backed scan config.
+ * PUT /api/admin/scan-config — update any subset of config fields.
  */
 adminRouter.get("/scan-config", async (c) => {
-  const config = c.get("config");
-  return c.json(getScanConfigView(config.scan.concurrency));
+  const { getScanConfig } = await import("../scans/config-storage.js");
+  const cfg = await getScanConfig();
+  return c.json(cfg);
 });
 
 adminRouter.put("/scan-config", async (c) => {
-  let body: { concurrency?: number | null };
+  let body: Record<string, unknown>;
   try {
-    body = (await c.req.json()) as { concurrency?: number | null };
+    body = (await c.req.json()) as Record<string, unknown>;
   } catch {
     throw new AppError("ERR_VALIDATION", { reason: "invalid_json" });
   }
-  if (body.concurrency === null) {
-    const n = setRuntimeConcurrency(null);
-    return c.json({ concurrency: n, source: "env" as const });
+  const { updateScanConfig } = await import("../scans/config-storage.js");
+  const updates: Record<string, unknown> = {};
+  const allowed = [
+    "scan_timeout_hours", "max_items_per_recon", "agent_max_parallel",
+    "audit_focus", "enable_dynamic_verify", "enable_dynamic_exploit",
+    "scan_concurrency",
+  ];
+  for (const k of allowed) {
+    if (k in body) updates[k] = body[k];
   }
-  if (typeof body.concurrency !== "number" || !Number.isFinite(body.concurrency)) {
-    throw new AppError("ERR_VALIDATION", { field: "concurrency" });
+  if (Object.keys(updates).length === 0) {
+    throw new AppError("ERR_VALIDATION", { reason: "no_valid_fields" });
   }
-  const n = setRuntimeConcurrency(body.concurrency);
-  return c.json({ concurrency: n, source: "override" as const });
+  const cfg = await updateScanConfig(updates);
+  // Apply concurrency change immediately
+  if (typeof updates.scan_concurrency === "number") {
+    setRuntimeConcurrency(updates.scan_concurrency);
+  }
+  logger.info({ updates: Object.keys(updates) }, "Admin updated scan config");
+  return c.json(cfg);
+});
+
+// GET /api/admin/system-health — connectivity checks
+adminRouter.get("/system-health", async (c) => {
+  const config = c.get("config");
+  const results: Record<string, { ok: boolean; latency_ms?: number; detail?: string }> = {};
+
+  // VH connectivity
+  try {
+    const start = Date.now();
+    const { getVulnHunterClient } = await import("../vulnhunter/index.js");
+    const vh = getVulnHunterClient();
+    const healthy = await vh.healthCheck();
+    results.vulnhunter = { ok: healthy, latency_ms: Date.now() - start };
+  } catch (e) {
+    results.vulnhunter = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+
+  // GitHub connectivity
+  try {
+    const start = Date.now();
+    const res = await fetch("https://api.github.com/rate_limit", {
+      headers: config.github.serverToken ? { authorization: `Bearer ${config.github.serverToken}` } : {},
+      signal: AbortSignal.timeout(5000),
+    });
+    results.github = { ok: res.ok, latency_ms: Date.now() - start };
+  } catch (e) {
+    results.github = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+
+  // SMTP connectivity
+  results.smtp = { ok: config.notify.emailEnabled && !!config.smtp.host };
+
+  return c.json(results);
+});
+
+// GET /api/admin/users — list all known users
+adminRouter.get("/users", async (c) => {
+  const db = (await import("../../infra/db/index.js")).getDb();
+  const rows = await db<
+    Array<{ user_id: string; login: string; avatar_url: string | null; email: string | null; last_seen: string; project_count: number }>
+  >`
+    SELECT
+      i.user_id::text, i.login, i.avatar_url, i.email,
+      i.last_seen_at::text AS last_seen,
+      COUNT(p.id) AS project_count
+    FROM github_identities i
+    LEFT JOIN projects p ON p.submitted_by = i.user_id
+    GROUP BY i.user_id, i.login, i.avatar_url, i.email, i.last_seen_at
+    ORDER BY i.last_seen_at DESC
+  `;
+  return c.json({ items: rows });
 });
 
 // DELETE /api/admin/projects/:id

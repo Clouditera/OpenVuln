@@ -320,17 +320,33 @@ async function dispatchOnce(concurrency: number): Promise<void> {
     attempted += 1;
     try {
       logger.info({ jobId: job.id, project: project.full_name }, "Dispatching scan job to VH");
+      // Load DB-backed scan config (falls back to env defaults if DB unavailable)
+      let dbConfig = null as null | {
+        scan_timeout_hours: number;
+        max_items_per_recon: number;
+        agent_max_parallel: number;
+        audit_focus: string | null;
+        enable_dynamic_verify: boolean;
+        enable_dynamic_exploit: boolean;
+      };
+      try {
+        const { getScanConfig } = await import("./config-storage.js");
+        dbConfig = await getScanConfig();
+      } catch {
+        // DB not ready or table missing — use env config
+      }
       const cfg = loadConfig();
-      const c = cfg.vulnhunter.create;
+      const envC = cfg.vulnhunter.create;
+      const timeoutHours = dbConfig?.scan_timeout_hours ?? envC.scanTimeoutHours;
       const createOpts = {
         displayName,
-        scanTimeoutSeconds: Math.round(c.scanTimeoutHours * 3600),
+        scanTimeoutSeconds: Math.round(timeoutHours * 3600),
         timeoutMode: "custom" as const,
-        maxItemsPerRecon: c.maxItemsPerRecon,
-        agentMaxParallel: c.agentMaxParallel,
-        auditFocus: c.auditFocus,
-        enableDynamicVerify: c.enableDynamicVerify,
-        enableDynamicExploit: c.enableDynamicExploit,
+        maxItemsPerRecon: dbConfig?.max_items_per_recon ?? envC.maxItemsPerRecon,
+        agentMaxParallel: dbConfig?.agent_max_parallel ?? envC.agentMaxParallel,
+        auditFocus: dbConfig?.audit_focus ?? envC.auditFocus,
+        enableDynamicVerify: dbConfig?.enable_dynamic_verify ?? envC.enableDynamicVerify,
+        enableDynamicExploit: dbConfig?.enable_dynamic_exploit ?? envC.enableDynamicExploit,
       };
 
       let taskId: string;
