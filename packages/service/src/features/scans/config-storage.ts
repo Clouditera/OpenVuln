@@ -47,7 +47,11 @@ export async function updateScanConfig(
     if (v === "en" || v === "en-US" || v.toLowerCase() === "english") outputLanguage = "en";
     else if (v === "zh-CN" || v === "zh" || v === "zh_CN" || v.toLowerCase() === "chinese")
       outputLanguage = "zh-CN";
-    else outputLanguage = "en";
+    else {
+      const err = new Error(`invalid_output_language:${v}`);
+      (err as Error & { code?: string }).code = "ERR_VALIDATION";
+      throw err;
+    }
   }
   const rows = await db<ScanConfigRow[]>`
     UPDATE scan_config SET

@@ -313,10 +313,11 @@ async function dispatchOnce(concurrency: number): Promise<void> {
       await storage.markFailed(job.id, "project_missing");
       continue;
     }
-    // Include attempt so admin retry / requeue never collides with VH display_name 409
+    // VH display_name: no `/`, `#`, spaces (post-upgrade validation). Keep unique per attempt.
     const shortId = job.id.slice(0, 8);
-    const attemptSuffix = job.attempt > 1 ? `a${job.attempt}` : "";
-    const displayName = `${project.full_name} #${shortId}${attemptSuffix}`;
+    const attemptSuffix = job.attempt > 1 ? `-a${job.attempt}` : "";
+    const safeRepo = `${project.owner_login}-${project.name}`.replace(/[^a-zA-Z0-9._-]+/g, "-");
+    const displayName = `${safeRepo}-${shortId}${attemptSuffix}`.slice(0, 120);
     attempted += 1;
     try {
       logger.info({ jobId: job.id, project: project.full_name }, "Dispatching scan job to VH");
@@ -340,9 +341,14 @@ async function dispatchOnce(concurrency: number): Promise<void> {
       const cfg = loadConfig();
       const envC = cfg.vulnhunter.create;
       const timeoutHours = dbConfig?.scan_timeout_hours ?? envC.scanTimeoutHours;
+      // VH custom mode: 1800s (30min) .. 259200s (72h)
+      const scanTimeoutSeconds = Math.min(
+        259_200,
+        Math.max(1_800, Math.round(Number(timeoutHours) * 3600)),
+      );
       const createOpts = {
         displayName,
-        scanTimeoutSeconds: Math.round(timeoutHours * 3600),
+        scanTimeoutSeconds,
         timeoutMode: "custom" as const,
         maxItemsPerRecon: dbConfig?.max_items_per_recon ?? envC.maxItemsPerRecon,
         agentMaxParallel: dbConfig?.agent_max_parallel ?? envC.agentMaxParallel,

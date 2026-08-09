@@ -333,7 +333,20 @@ adminRouter.put("/scan-config", async (c) => {
   if (Object.keys(updates).length === 0) {
     throw new AppError("ERR_VALIDATION", { reason: "no_valid_fields" });
   }
-  const cfg = await updateScanConfig(updates);
+  let cfg;
+  try {
+    cfg = await updateScanConfig(updates);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.startsWith("invalid_output_language:")) {
+      throw new AppError("ERR_VALIDATION", {
+        field: "output_language",
+        reason: "must_be_en_or_zh-CN",
+        message: "output_language must be en or zh-CN",
+      });
+    }
+    throw e;
+  }
   // Apply concurrency change immediately
   if (typeof updates.scan_concurrency === "number") {
     setRuntimeConcurrency(updates.scan_concurrency);

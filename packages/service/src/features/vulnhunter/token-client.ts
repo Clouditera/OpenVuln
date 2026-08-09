@@ -51,8 +51,8 @@ export class TokenVulnHunterClient implements VulnHunterClient {
     const credentialId = input.credentialId ?? this.defaultCredentialId;
     const body: Record<string, unknown> = {
       git_url: input.gitUrl,
-      // project_name = repo short name; display_name avoids VH 409 on repeats
-      project_name: input.displayName.split(" ")[0] || input.displayName,
+      // project_name: short label for VH UI; display_name must be unique & charset-safe
+      project_name: input.displayName.split("-")[0] || input.displayName.slice(0, 64),
       display_name: input.displayName,
     };
     if (credentialId) body.credential_id = credentialId;
