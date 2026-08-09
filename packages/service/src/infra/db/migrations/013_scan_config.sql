@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS scan_config (
   audit_focus text,
   enable_dynamic_verify boolean NOT NULL DEFAULT true,
   enable_dynamic_exploit boolean NOT NULL DEFAULT true,
-  scan_concurrency int NOT NULL DEFAULT 2,
+  scan_concurrency int NOT NULL DEFAULT 10,
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT scan_config_singleton CHECK (id = 1)
 );

@@ -15,6 +15,18 @@ async function main(): Promise<void> {
   await runMigrations();
 
   initVulnHunterClient(config);
+  // Prefer DB scan_concurrency when present (admin Settings); env is fallback only.
+  try {
+    const { getScanConfig } = await import("./features/scans/config-storage.js");
+    const { setRuntimeConcurrency } = await import("./features/scans/queue.js");
+    const dbCfg = await getScanConfig();
+    if (dbCfg?.scan_concurrency != null) {
+      setRuntimeConcurrency(dbCfg.scan_concurrency);
+      logger.info({ concurrency: dbCfg.scan_concurrency }, "Scan concurrency from DB");
+    }
+  } catch {
+    /* table missing on first boot before migrations — startScanLoops uses env */
+  }
   startScanLoops(config);
   startMailer(config);
 

@@ -95,7 +95,13 @@ projectsRouter.post("/", requireAuth, async (c) => {
   if (typeof gitUrl !== "string" || !gitUrl.trim()) {
     throw new AppError("ERR_VALIDATION", { field: "git_url" });
   }
-  const ref = typeof body?.ref === "string" ? body.ref.trim() : undefined;
+  const refRaw =
+    typeof body?.ref === "string"
+      ? body.ref
+      : typeof body?.git_ref === "string"
+        ? body.git_ref
+        : undefined;
+  const ref = typeof refRaw === "string" ? refRaw.trim() : undefined;
   const result = await service.submitProject(gitUrl.trim(), config, user, ref);
   return c.json(result, 201);
 });

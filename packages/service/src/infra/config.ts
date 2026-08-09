@@ -155,7 +155,7 @@ export function loadConfig(): ServiceConfig {
     },
     submitDailyLimit: Number(optionalEnv("SUBMIT_DAILY_LIMIT", "10")),
     scan: {
-      concurrency: Number(optionalEnv("SCAN_CONCURRENCY", "4")),
+      concurrency: Number(optionalEnv("SCAN_CONCURRENCY", "10")),
       cooldownDays: Number(optionalEnv("SCAN_COOLDOWN_DAYS", "7")),
       dispatcherIntervalMs: Number(optionalEnv("SCAN_DISPATCHER_INTERVAL_MS", "10000")),
       pollerIntervalMs: Number(optionalEnv("SCAN_POLLER_INTERVAL_MS", "30000")),

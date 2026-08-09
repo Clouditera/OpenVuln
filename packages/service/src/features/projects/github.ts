@@ -92,24 +92,39 @@ export async function resolveRootRepo(
   return { meta: rootMeta, wasFork: true };
 }
 
+const FULL_SHA_RE = /^[0-9a-f]{40}$/i;
+
+/** Resolve branch/tag/commit-ish to a full commit SHA. null if not found. */
 export async function fetchDefaultBranchHeadSha(
   owner: string,
   repo: string,
   branch: string,
   serverToken?: string,
 ): Promise<string | null> {
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${branch}`, {
-    headers: {
-      ...authHeaders(serverToken || undefined),
-      accept: "application/vnd.github.sha",
+  const ref = branch.trim();
+  if (!ref) return null;
+
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`,
+    {
+      headers: {
+        ...authHeaders(serverToken || undefined),
+        accept: "application/vnd.github.sha",
+      },
     },
-  });
+  );
   if (!res.ok) return null;
+
   const contentType = res.headers.get("content-type") ?? "";
+  let sha: string | null = null;
   if (contentType.includes("json")) {
-    const data = (await res.json()) as { sha?: string };
-    return data.sha ?? null;
+    // Error bodies are also JSON — never treat message payload as success without sha
+    const data = (await res.json()) as { sha?: string; message?: string };
+    sha = typeof data.sha === "string" ? data.sha.trim() : null;
+  } else {
+    sha = (await res.text()).trim() || null;
   }
-  const text = (await res.text()).trim();
-  return text || null;
+  // Only accept full 40-char hex SHAs (reject accidental non-sha bodies)
+  if (!sha || !FULL_SHA_RE.test(sha)) return null;
+  return sha.toLowerCase();
 }
