@@ -412,13 +412,16 @@ adminRouter.delete("/scan-jobs/:jobId", async (c) => {
   const jobId = c.req.param("jobId");
   const { getDb } = await import("../../infra/db/index.js");
   const db = getDb();
-  const rows = await db<{ id: string }[]>`
-    DELETE FROM scan_jobs
-    WHERE id = ${jobId}::uuid
-      AND state IN ('failed', 'cancelled', 'rejected')
-    RETURNING id::text
+  // Verify terminal state first
+  const job = await db<{ id: string; project_id: string }[]>`
+    SELECT id::text, project_id::text FROM scan_jobs
+    WHERE id = ${jobId}::uuid AND state IN ('failed', 'cancelled', 'rejected')
   `;
-  if (rows.length === 0) throw new AppError("ERR_CONFLICT", { reason: "not_deletable", message: "Only failed/cancelled/rejected jobs can be deleted" });
+  if (job.length === 0) throw new AppError("ERR_CONFLICT", { reason: "not_deletable", message: "Only failed/cancelled/rejected jobs can be deleted" });
+  // Cascade: artifacts → findings → job
+  await db`DELETE FROM finding_artifacts WHERE finding_id IN (SELECT id FROM findings WHERE scan_job_id = ${jobId}::uuid)`;
+  await db`DELETE FROM findings WHERE scan_job_id = ${jobId}::uuid`;
+  await db`DELETE FROM scan_jobs WHERE id = ${jobId}::uuid`;
   logger.info({ jobId }, "Admin deleted terminal scan job");
   return c.json({ ok: true });
 });
