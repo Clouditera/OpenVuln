@@ -461,21 +461,43 @@ export async function listAllScans(projectId: string): Promise<ScanJobRow[]> {
 
 /** List all pending_review jobs (admin queue). */
 export async function listPendingReview(): Promise<
-  Array<ScanJobRow & { full_name: string; submitted_by: number | null }>
+  Array<{
+    id: string;
+    project_id: string;
+    vulnhunter_task_id: string | null;
+    state: ScanJobState;
+    commit_sha: string | null;
+    git_ref: string | null;
+    attempt: number;
+    fail_reason_internal: string | null;
+    findings_so_far: number;
+    consecutive_failures: number;
+    created_at: Date;
+    started_at: Date | null;
+    finished_at: Date | null;
+    full_name: string;
+    html_url: string;
+    submitted_by: number | null;
+    submitter_login: string | null;
+    submitter_email: string | null;
+    submitter_avatar: string | null;
+  }>
 > {
   const db = getDb();
-  return db<
-    Array<ScanJobRow & { full_name: string; submitted_by: number | null }>
-  >`
+  return db`
     SELECT
       j.id::text, j.project_id::text, j.vulnhunter_task_id::text,
       j.state, j.commit_sha, j.git_ref, j.attempt, j.fail_reason_internal,
       COALESCE(j.findings_so_far, 0) AS findings_so_far,
       COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
       j.created_at, j.started_at, j.finished_at,
-      p.full_name, p.submitted_by
+      p.full_name, p.html_url, p.submitted_by,
+      i.login AS submitter_login,
+      i.email AS submitter_email,
+      i.avatar_url AS submitter_avatar
     FROM scan_jobs j
     JOIN projects p ON p.id = j.project_id
+    LEFT JOIN github_identities i ON i.user_id = p.submitted_by
     WHERE j.state = 'pending_review'
     ORDER BY j.created_at ASC
   `;
