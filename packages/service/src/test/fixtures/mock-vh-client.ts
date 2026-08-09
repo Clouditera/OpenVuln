@@ -160,6 +160,22 @@ export class MockVulnHunterClient implements VulnHunterClient {
     this.tasks.delete(taskId);
   }
 
+  /** Fail next N deleteTask calls with this error message (then succeed). */
+  private deleteFailLeft = 0;
+  private deleteFailMsg = "ERR_TASK_BUSY";
+  forceDeleteBusy(times = 1, msg = "ERR_TASK_BUSY"): void {
+    this.deleteFailLeft = times;
+    this.deleteFailMsg = msg;
+  }
+
+  async deleteTask(taskId: string): Promise<void> {
+    if (this.deleteFailLeft > 0) {
+      this.deleteFailLeft -= 1;
+      throw new Error(this.deleteFailMsg);
+    }
+    this.tasks.delete(taskId);
+  }
+
   /** Test helper: force a raw VH state string (including unknown). */
   forceState(taskId: string, state: VhTaskState): void {
     const t = this.tasks.get(taskId);

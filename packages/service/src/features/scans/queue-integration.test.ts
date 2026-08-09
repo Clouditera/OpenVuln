@@ -161,4 +161,55 @@ describe("scan queue integration", () => {
     const still = await db`SELECT id FROM projects WHERE id = ${p2.projectId}::uuid`;
     expect(still.length).toBe(1);
   });
+
+  it("teardown: BUSY twice then success drains queue", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/teardown-busy" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    expect(scanning?.state).toBe("scanning");
+    const vhId = scanning!.vulnhunter_task_id!;
+
+    // Simulate cancel path: local hard-delete + enqueue (no sync VH delete)
+    await scanStorage.hardDeleteGoneJob(job.id, projectId);
+    await scanStorage.enqueueVhTeardown(vhId);
+    expect(await scanStorage.countTeardownQueue()).toBe(1);
+
+    ctx.mockVh.forceDeleteBusy(2, "ERR_TASK_BUSY");
+    // Force next_retry_at due by re-enqueue after bump would delay — set due via raw SQL
+    const db = (await import("../../infra/db/index.js")).getDb();
+
+    await scanQueueInternal.teardownOnce(5);
+    expect(await scanStorage.countTeardownQueue()).toBe(1);
+    await db`UPDATE vh_teardown_queue SET next_retry_at = now() - interval '1 second'`;
+
+    await scanQueueInternal.teardownOnce(5);
+    expect(await scanStorage.countTeardownQueue()).toBe(1);
+    await db`UPDATE vh_teardown_queue SET next_retry_at = now() - interval '1 second'`;
+
+    await scanQueueInternal.teardownOnce(5);
+    expect(await scanStorage.countTeardownQueue()).toBe(0);
+  });
+
+  it("teardown: VH unreachable keeps queue; local cancel already deleted job", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/teardown-down" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    const vhId = scanning!.vulnhunter_task_id!;
+
+    await scanStorage.hardDeleteGoneJob(job.id, projectId);
+    expect(await scanStorage.getScanJob(job.id)).toBeNull();
+    await scanStorage.enqueueVhTeardown(vhId);
+
+    ctx.mockVh.forceDeleteBusy(5, "ECONNREFUSED");
+    await scanQueueInternal.teardownOnce(5);
+    expect(await scanStorage.countTeardownQueue()).toBe(1);
+    // local already clean
+    const db = (await import("../../infra/db/index.js")).getDb();
+    const gone = await db`SELECT id FROM projects WHERE id = ${projectId}::uuid`;
+    expect(gone.length).toBe(0);
+  });
 });

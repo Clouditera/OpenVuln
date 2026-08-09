@@ -790,9 +790,47 @@ export async function deleteVhTaskOnly(vhTaskId: string): Promise<void> {
   }
 }
 
+const TEARDOWN_MAX_ATTEMPTS = 20;
+
+/** Background: drain vh_teardown_queue with backoff on BUSY/network errors. */
+export async function teardownOnce(limit = 5): Promise<number> {
+  const rows = await storage.claimDueTeardowns(limit);
+  if (rows.length === 0) return 0;
+  const vh = getVulnHunterClient();
+  let done = 0;
+  for (const row of rows) {
+    try {
+      await vh.deleteTask(row.vh_task_id);
+      await storage.removeTeardown(row.id);
+      done += 1;
+      logger.info({ vhTaskId: row.vh_task_id }, "VH teardown deleted");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not_found") || msg.includes("404")) {
+        await storage.removeTeardown(row.id);
+        done += 1;
+        logger.info({ vhTaskId: row.vh_task_id }, "VH teardown already gone");
+        continue;
+      }
+      const { attempts } = await storage.bumpTeardownRetry(row.id, msg);
+      if (attempts >= TEARDOWN_MAX_ATTEMPTS) {
+        logger.error(
+          { vhTaskId: row.vh_task_id, attempts, err: msg.slice(0, 200) },
+          "VH teardown exhausted retries — manual cleanup needed",
+        );
+      } else {
+        logger.warn(
+          { vhTaskId: row.vh_task_id, attempts, err: msg.slice(0, 120) },
+          "VH teardown deferred",
+        );
+      }
+    }
+  }
+  return done;
+}
+
 /**
- * @deprecated Prefer owner cancelScanJob (hard delete). Kept for callers that
- * still want VH delete + markCancelled.
+ * @deprecated Prefer owner cancelScanJob (hard delete + async teardown).
  */
 export async function cancelScanJobVh(
   jobId: string,
@@ -802,6 +840,9 @@ export async function cancelScanJobVh(
   await storage.markCancelled(jobId, "cancelled_by_user");
   logger.info({ jobId, vhTaskId }, "Scan job cancelled (VH task deleted)");
 }
+
+let teardownTimer: ReturnType<typeof setInterval> | null = null;
+let teardownBusy = false;
 
 export function startScanLoops(config: ServiceConfig): void {
   if (running) return;
@@ -826,11 +867,23 @@ export function startScanLoops(config: ServiceConfig): void {
         pollBusy = false;
       });
   };
+  const runTeardown = () => {
+    if (teardownBusy) return;
+    teardownBusy = true;
+    teardownOnce(5)
+      .catch((err) => logger.error({ err }, "teardown tick failed"))
+      .finally(() => {
+        teardownBusy = false;
+      });
+  };
 
   runDispatch();
   runPoll();
+  runTeardown();
   dispatcherTimer = setInterval(runDispatch, config.scan.dispatcherIntervalMs);
   pollerTimer = setInterval(runPoll, config.scan.pollerIntervalMs);
+  // Teardown on dispatcher cadence (default 10s)
+  teardownTimer = setInterval(runTeardown, config.scan.dispatcherIntervalMs);
   logger.info(
     {
       concurrency: getEffectiveConcurrency(config.scan.concurrency),
@@ -838,23 +891,27 @@ export function startScanLoops(config: ServiceConfig): void {
       pollerMs: config.scan.pollerIntervalMs,
       vhFailGracePolls: config.scan.vhFailGracePolls,
     },
-    "Scan dispatcher + poller started",
+    "Scan dispatcher + poller + teardown started",
   );
 }
 
 export function stopScanLoops(): void {
   if (dispatcherTimer) clearInterval(dispatcherTimer);
   if (pollerTimer) clearInterval(pollerTimer);
+  if (teardownTimer) clearInterval(teardownTimer);
   dispatcherTimer = null;
   pollerTimer = null;
+  teardownTimer = null;
   running = false;
   dispatchBusy = false;
   pollBusy = false;
+  teardownBusy = false;
 }
 
 export const _internal = {
   dispatchOnce,
   pollOnce,
+  teardownOnce,
   syncCompletedFindings,
   countIngestibleFromList,
   mapFindingSeverity,

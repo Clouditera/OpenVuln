@@ -273,9 +273,8 @@ export async function submitProject(
 
 /**
  * Cancel a scan job (owner action).
- * pending_review / queued / scanning → stop VH if needed, then hard-delete the job.
- * If the project has no remaining jobs → hard-delete the project too.
- * No cancelled shell left for users (fish No.1661).
+ * pending_review / queued / scanning → hard-delete local job/project immediately.
+ * VH cleanup is async via vh_teardown_queue (never blocks / 502s the user).
  */
 export async function cancelScanJob(
   projectId: string,
@@ -303,22 +302,10 @@ export async function cancelScanJob(
     });
   }
 
-  // scanning: best-effort stop VH first (404 ok)
-  if (job.state === "scanning" && job.vulnhunter_task_id) {
-    try {
-      const { deleteVhTaskOnly } = await import("../scans/queue.js");
-      await deleteVhTaskOnly(job.vulnhunter_task_id);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes("not_found") && !msg.includes("404")) {
-        throw new AppError("ERR_UPSTREAM", {
-          reason: "vh_cancel_failed",
-          message: `Failed to cancel VulnHunter task: ${msg.slice(0, 200)}`,
-        });
-      }
-    }
-  }
-
+  const vhTaskId = job.vulnhunter_task_id;
   const { projectDeleted } = await scanStorage.hardDeleteGoneJob(jobId, projectId);
+  if (vhTaskId) {
+    await scanStorage.enqueueVhTeardown(vhTaskId);
+  }
   return { ok: true, deleted: projectDeleted ? "project" : "job" };
 }

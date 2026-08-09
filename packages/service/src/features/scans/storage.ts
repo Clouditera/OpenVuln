@@ -546,3 +546,75 @@ export async function rejectScanJob(
   `;
   return rows[0] ?? null;
 }
+
+// ── VH teardown queue (async delete after user cancel) ──────────────────────
+
+export interface TeardownRow {
+  id: string;
+  vh_task_id: string;
+  attempts: number;
+  next_retry_at: Date;
+  last_error: string | null;
+  created_at: Date;
+}
+
+/** Enqueue VH task for background delete. Idempotent on vh_task_id. */
+export async function enqueueVhTeardown(vhTaskId: string): Promise<void> {
+  const db = getDb();
+  await db`
+    INSERT INTO vh_teardown_queue (vh_task_id, next_retry_at)
+    VALUES (${vhTaskId}, now())
+    ON CONFLICT (vh_task_id) DO NOTHING
+  `;
+}
+
+/** Claim due teardown rows (limit), ordered by next_retry_at. */
+export async function claimDueTeardowns(limit = 5): Promise<TeardownRow[]> {
+  const db = getDb();
+  return db<TeardownRow[]>`
+    SELECT id::text, vh_task_id, attempts, next_retry_at, last_error, created_at
+    FROM vh_teardown_queue
+    WHERE next_retry_at <= now()
+    ORDER BY next_retry_at ASC
+    LIMIT ${limit}
+  `;
+}
+
+export async function removeTeardown(id: string): Promise<void> {
+  const db = getDb();
+  await db`DELETE FROM vh_teardown_queue WHERE id = ${id}::uuid`;
+}
+
+/** Exponential backoff: 30s * 2^attempts, cap 30min. */
+export function teardownBackoffSeconds(attemptsAfterBump: number): number {
+  const base = 30 * 2 ** Math.max(0, attemptsAfterBump - 1);
+  return Math.min(base, 30 * 60);
+}
+
+export async function bumpTeardownRetry(
+  id: string,
+  errMsg: string,
+): Promise<{ attempts: number }> {
+  const db = getDb();
+  // Read current attempts, then set next_retry from JS backoff
+  const cur = await db<{ attempts: number }[]>`
+    SELECT attempts FROM vh_teardown_queue WHERE id = ${id}::uuid
+  `;
+  const nextAttempts = (cur[0]?.attempts ?? 0) + 1;
+  const delaySec = teardownBackoffSeconds(nextAttempts);
+  const rows = await db<{ attempts: number }[]>`
+    UPDATE vh_teardown_queue
+    SET attempts = ${nextAttempts},
+        last_error = ${errMsg.slice(0, 500)},
+        next_retry_at = now() + (${delaySec}::text || ' seconds')::interval
+    WHERE id = ${id}::uuid
+    RETURNING attempts
+  `;
+  return { attempts: rows[0]?.attempts ?? nextAttempts };
+}
+
+export async function countTeardownQueue(): Promise<number> {
+  const db = getDb();
+  const rows = await db<{ n: string }[]>`SELECT count(*)::text AS n FROM vh_teardown_queue`;
+  return Number(rows[0]?.n ?? 0);
+}
