@@ -4,7 +4,8 @@
 > 任务：task-bf10dc47  
 > 环境：https://openvuln.vulnhunter.pro（主站）+ HF Space（若测弹窗登录）  
 > 管理台（审核配合）：http://192.168.31.77:5173  
-> **本版只定表与方法，不执行大规模跑测**  
+> **已合并为 v2 定稿**：请阅 `docs/qa/user-e2e-matrix-v2.md`。本文件保留为溯源草稿。
+> **执行冻结**至 VH 升级对齐。  
 
 ---
 
@@ -419,6 +420,77 @@ Phase 6  F2-05/F9-05 HF（可选）
 
 ---
 
+
+---
+
+## 9. designer 补充（交互/视觉/文案视角）
+
+> 覆盖：导航与 deck 交互、确认框与危险操作、空/载/错三态、铃铛与菜单、版本条、披露管理台、响应式、a11y、文本选择回归、深色一致性、文案口径回归。
+
+### 9.1 Deck 与导航交互（首页）
+
+| 用例 ID | 场景 | 步骤/期望 | P |
+|---|---|---|---|
+| **D-01** | 滚轮翻页 vs 列表内滚 | 页1 滚轮 → 翻页2；页2 鼠标悬停列表内滚轮 → **列表内部滚动不翻页**（swiper-no-mousewheel 回归） | P0 |
+| **D-02** | 文本可选择（回归） | 拖选 H1 / 项目行内描述 / Findings 标题 | 可选中可复制（Swiper simulateTouch / role=link / role=button 三修复回归） | P0 |
+| **D-03** | hash 同步 | 翻到页2 → URL 变 `/#projects`；直接开 `/#projects` → 落页2；项目页「Projects」返回 → 回页2且**列表滚动位置/排序/搜索词保留**（listCache） | P1 |
+| **D-04** | 页号点导航 | 右缘圆点点击切页；active 态正确 | P2 |
+| **D-05** | 键盘翻页 | 焦点在 deck 时 ↑/↓/PgUp/PgDn 切页 | P2 |
+
+### 9.2 确认框与危险操作
+
+| 用例 ID | 场景 | 步骤/期望 | P |
+|---|---|---|---|
+| **D-06** | Disclose 确认框 | 勾选 N 条 → Disclose → 弹窗标题含数量、正文明示**不可逆 + 运营兜底**、确认钮 "Disclose permanently"；点 Cancel 不披露；Esc 关闭 | P0 |
+| **D-07** | Cancel scan 确认框 | 进度页/版本条 Cancel → 弹窗明示"释放槽位、可重提"；确认钮 danger 红 | P0 |
+| **D-08** | 确认框焦点/键盘 | 弹窗打开焦点入框；Esc 关；遮罩点击行为符合预期（关或不关需写死期望） | P1 |
+| **D-09** | 披露反馈 | 披露成功 → flash 条（"N findings disclosed…"）+ 该条目状态翻牌 Disclosed + 勾选清空 | P0 |
+
+### 9.3 空 / 加载 / 错误三态
+
+| 用例 ID | 场景 | 期望 | P |
+|---|---|---|---|
+| **D-10** | 空态全系 | 无通知（铃铛"No notifications yet"）/ `/my` 空（引导提交按钮）/ 0 findings completed（友好空态非报错）/ 无披露（Findings 公众"暂无披露"口径，**无"加密/运营团队"旧词**——旧文案清除回归） | P0 |
+| **D-11** | 加载态 | 项目页骨架/手风琴展开"Loading full report…"/铃铛 Loading —— 均有明确 loading 指示不白屏 | P1 |
+| **D-12** | 错误态可读 | 提交 403/401/ref_not_found/私有仓 → 产品句内联错误（非裸 JSON、非 500 栈）；API 宕 → 列表 EmptyState「Could not load projects」 | P0 |
+| **D-13** | 通知点击跳已读 | 铃铛未读红点数字（>9 显 9+）；点条目 → 跳项目页 + 该条已读 + 红点减；Mark all read 清零 | P0 |
+| **D-14** | 菜单关闭行为 | 铃铛/头像/版本下拉：点击外部关闭 + Esc 关闭 | P1 |
+
+### 9.4 Owner 管理台交互
+
+| 用例 ID | 场景 | 期望 | P |
+|---|---|---|---|
+| **D-15** | 版本条交互 | 头部版本下拉：列出 completed 版本（SHA/findings 数/时间）、点击切换、历史版蓝横幅"仅 current 可披露 + Back to current"、进行中 pill（In review/Preparing/Scanning 映射正确） | P0 |
+| **D-16** | 披露勾选组 | 全选"Select undisclosed (N)"联动计数；已披露行 checkbox disabled；历史版全部 disabled；Disclose (N) 按钮计数同步 | P0 |
+| **D-17** | 手风琴单开 | 展开一张自动收起其他；chevron 旋转；展开懒加载单条全文 + Artifacts 列表 | P1 |
+| **D-18** | 入口发现性 | owner 登录后项目页自然出现 Findings 管理内容（无隐藏入口）；`/my` 从头像菜单可达；Sign in 入口在 deck 页1 和内页顶栏都在 | P1 |
+
+### 9.5 响应式与 a11y 抽样
+
+| 用例 ID | 场景 | 期望 | P |
+|---|---|---|---|
+| **D-19** | 移动窄屏 375px | deck 圆点隐藏；hero 不溢出；项目页表格/卡片不横向滚动（或可控）；顶栏按钮不挤爆 | P1 |
+| **D-20** | 键盘可达 | 手风琴头（role=button）Enter/Space 开合、aria-expanded 正确；项目行（role=link）Enter 跳转；Tab 顺序合理；focus-ring 可见 | P1 |
+| **D-21** | 深色一致性抽查 | 随机 3 页无浅色残留；原生下拉/滚动条深色（color-scheme 回归）；selection 高亮深色可读 | P1 |
+
+### 9.6 文案口径回归（断言用）
+
+| 用例 ID | 检查点 | 期望 | P |
+|---|---|---|---|
+| **D-22** | 状态词统一 | 全站仅 In review / Scanning / Scanned；**无** Queued / Waiting to be scanned 残留（与 F10-02 同，阻断级） | P0 |
+| **D-23** | 旧模型文案清除 | 无"encrypted / operations team / maintainer confirmation"等废加密+运营披露时代残留（项目页锁定卡、Findings 空态重点查） | P0 |
+| **D-24** | 披露口径 | 披露条/确认框含"仅当前版本"语义（permanent + current scan version） | P1 |
+| **D-25** | 外链 | footer "Powered by VulnHunter" → `vulnhunt.clouditera.com` 新窗口；GitHub 图标链主仓 | P2 |
+| **D-26** | 审核中预期管理 | In review 进度页文案含"团队审核 + 邮件通知结果"（替代 ETA，当前设计口径） | P1 |
+
+### 9.7 执行提示
+
+- D-01/D-02/D-03 是**历史回归点**（都出过线上事故），建议放 Phase 1 与 F1 同跑，纯浏览器无成本
+- D-19/D-20/D-21 用 DevTools 设备模拟 + 键盘手测即可，每个 ≤5 分钟
+- D-22/D-23 可用全局文本搜（playwright 抓 body innerText 正则）一次性自动化
+
+---
+
 ## 6. 修订记录
 
 | 版本 | 说明 |
@@ -426,3 +498,4 @@ Phase 6  F2-05/F9-05 HF（可选）
 | v1 | qa 初稿：功能表 + 方法 + 双账号/fork 规划；待 pm/designer/developer 补场景后出 v2 再执行 |
 | v1.1 | pm 产品补充：口径裁定 + F1/F3/F4/F5/F6/F7/F8/F9 增补用例与执行策略 |
 | v1.2-dev | developer：错误码表、Cookie/HF 弹窗、ref_not_found/限额、Cancel 状态机（含 dispatching/pending_review 占槽）、通知 API、端点覆盖与造数注意 |
+| v1.3-designer | designer（§9）：deck 交互回归（滚轮嵌套/文本选择/hash/列表状态）、确认框与危险操作、空载错三态、铃铛菜单、版本条与披露勾选组、入口发现性、响应式+a11y 抽样、文案口径回归（In review 统一/旧模型词清除） |
