@@ -75,7 +75,7 @@ adminRouter.get("/projects", async (c) => {
     params.push(`%${search}%`);
   }
 
-  const whereClause = baseWhere.length > 0 ? `WHERE ${baseWhere.join(" AND ")}` : "";
+  const whereClause = baseWhere.length > 0 ? `WHERE p.removed_at IS NULL AND ${baseWhere.join(" AND ")}` : "WHERE p.removed_at IS NULL";
 
   const rows = await db.unsafe(
     `SELECT
@@ -388,11 +388,32 @@ adminRouter.get("/users", async (c) => {
   return c.json({ items: rows });
 });
 
-// DELETE /api/admin/projects/:id
+// DELETE /api/admin/projects/:id — hard delete (cascade findings + scan_jobs + artifacts)
 adminRouter.delete("/projects/:projectId", async (c) => {
   const projectId = c.req.param("projectId");
-  const ok = await projectStorage.softDelete(projectId);
-  if (!ok) throw new AppError("ERR_NOT_FOUND", { resource: "project" });
+  const { getDb } = await import("../../infra/db/index.js");
+  const db = getDb();
+  const rows = await db<{ id: string }[]>`
+    DELETE FROM projects WHERE id = ${projectId}::uuid RETURNING id::text
+  `;
+  if (rows.length === 0) throw new AppError("ERR_NOT_FOUND", { resource: "project" });
+  logger.info({ projectId }, "Admin hard-deleted project");
+  return c.json({ ok: true });
+});
+
+// DELETE /api/admin/scan-jobs/:jobId — delete terminal scan job (failed/cancelled/rejected only)
+adminRouter.delete("/scan-jobs/:jobId", async (c) => {
+  const jobId = c.req.param("jobId");
+  const { getDb } = await import("../../infra/db/index.js");
+  const db = getDb();
+  const rows = await db<{ id: string }[]>`
+    DELETE FROM scan_jobs
+    WHERE id = ${jobId}::uuid
+      AND state IN ('failed', 'cancelled', 'rejected')
+    RETURNING id::text
+  `;
+  if (rows.length === 0) throw new AppError("ERR_CONFLICT", { reason: "not_deletable", message: "Only failed/cancelled/rejected jobs can be deleted" });
+  logger.info({ jobId }, "Admin deleted terminal scan job");
   return c.json({ ok: true });
 });
 
