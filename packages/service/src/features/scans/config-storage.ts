@@ -5,6 +5,8 @@ export interface ScanConfigRow {
   max_items_per_recon: number;
   agent_max_parallel: number;
   audit_focus: string | null;
+  output_language: string;
+  vuln_focus: string | null;
   enable_dynamic_verify: boolean;
   enable_dynamic_exploit: boolean;
   scan_concurrency: number;
@@ -14,7 +16,8 @@ export async function getScanConfig(): Promise<ScanConfigRow> {
   const db = getDb();
   const rows = await db<ScanConfigRow[]>`
     SELECT scan_timeout_hours, max_items_per_recon, agent_max_parallel,
-           audit_focus, enable_dynamic_verify, enable_dynamic_exploit,
+           audit_focus, output_language, vuln_focus,
+           enable_dynamic_verify, enable_dynamic_exploit,
            scan_concurrency
     FROM scan_config WHERE id = 1
   `;
@@ -22,26 +25,46 @@ export async function getScanConfig(): Promise<ScanConfigRow> {
 }
 
 export async function updateScanConfig(
-  updates: Partial<Pick<ScanConfigRow, 
-    'scan_timeout_hours' | 'max_items_per_recon' | 'agent_max_parallel' |
-    'audit_focus' | 'enable_dynamic_verify' | 'enable_dynamic_exploit' |
-    'scan_concurrency'
-  >>,
+  updates: Partial<
+    Pick<
+      ScanConfigRow,
+      | "scan_timeout_hours"
+      | "max_items_per_recon"
+      | "agent_max_parallel"
+      | "audit_focus"
+      | "output_language"
+      | "vuln_focus"
+      | "enable_dynamic_verify"
+      | "enable_dynamic_exploit"
+      | "scan_concurrency"
+    >
+  >,
 ): Promise<ScanConfigRow> {
   const db = getDb();
+  let outputLanguage = updates.output_language ?? null;
+  if (outputLanguage != null) {
+    const v = String(outputLanguage).trim();
+    if (v === "en" || v === "en-US" || v.toLowerCase() === "english") outputLanguage = "en";
+    else if (v === "zh-CN" || v === "zh" || v === "zh_CN" || v.toLowerCase() === "chinese")
+      outputLanguage = "zh-CN";
+    else outputLanguage = "en";
+  }
   const rows = await db<ScanConfigRow[]>`
     UPDATE scan_config SET
       scan_timeout_hours = COALESCE(${updates.scan_timeout_hours ?? null}, scan_timeout_hours),
       max_items_per_recon = COALESCE(${updates.max_items_per_recon ?? null}, max_items_per_recon),
       agent_max_parallel = COALESCE(${updates.agent_max_parallel ?? null}, agent_max_parallel),
       audit_focus = COALESCE(${updates.audit_focus ?? null}, audit_focus),
+      output_language = COALESCE(${outputLanguage}, output_language),
+      vuln_focus = COALESCE(${updates.vuln_focus ?? null}, vuln_focus),
       enable_dynamic_verify = COALESCE(${updates.enable_dynamic_verify ?? null}, enable_dynamic_verify),
       enable_dynamic_exploit = COALESCE(${updates.enable_dynamic_exploit ?? null}, enable_dynamic_exploit),
       scan_concurrency = COALESCE(${updates.scan_concurrency ?? null}, scan_concurrency),
       updated_at = now()
     WHERE id = 1
     RETURNING scan_timeout_hours, max_items_per_recon, agent_max_parallel,
-              audit_focus, enable_dynamic_verify, enable_dynamic_exploit,
+              audit_focus, output_language, vuln_focus,
+              enable_dynamic_verify, enable_dynamic_exploit,
               scan_concurrency
   `;
   return rows[0];

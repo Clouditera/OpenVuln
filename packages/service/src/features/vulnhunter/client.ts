@@ -59,6 +59,10 @@ export interface CreateScanTaskOptions {
   maxItemsPerRecon?: number;
   agentMaxParallel?: number;
   auditFocus?: string;
+  /** BCP-47: en | zh-CN (VH output_language). */
+  outputLanguage?: string;
+  /** Vulnerability focus surface (VH vuln_focus); separate from auditFocus process instr. */
+  vulnFocus?: string;
   enableDynamicVerify?: boolean;
   enableDynamicExploit?: boolean;
 }

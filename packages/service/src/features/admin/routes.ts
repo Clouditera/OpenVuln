@@ -323,7 +323,8 @@ adminRouter.put("/scan-config", async (c) => {
   const updates: Record<string, unknown> = {};
   const allowed = [
     "scan_timeout_hours", "max_items_per_recon", "agent_max_parallel",
-    "audit_focus", "enable_dynamic_verify", "enable_dynamic_exploit",
+    "audit_focus", "output_language", "vuln_focus",
+    "enable_dynamic_verify", "enable_dynamic_exploit",
     "scan_concurrency",
   ];
   for (const k of allowed) {

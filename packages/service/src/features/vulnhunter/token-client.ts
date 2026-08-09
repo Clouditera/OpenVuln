@@ -67,6 +67,8 @@ export class TokenVulnHunterClient implements VulnHunterClient {
     if (input.maxItemsPerRecon != null) body.max_items_per_recon = input.maxItemsPerRecon;
     if (input.agentMaxParallel != null) body.agent_max_parallel = input.agentMaxParallel;
     if (input.auditFocus) body.audit_focus = input.auditFocus;
+    if (input.outputLanguage) body.output_language = input.outputLanguage;
+    if (input.vulnFocus) body.vuln_focus = input.vulnFocus;
     if (input.enableDynamicVerify != null) body.enable_dynamic_verify = input.enableDynamicVerify;
     if (input.enableDynamicExploit != null) body.enable_dynamic_exploit = input.enableDynamicExploit;
 
@@ -118,6 +120,8 @@ export class TokenVulnHunterClient implements VulnHunterClient {
       form.append("agent_max_parallel", String(input.agentMaxParallel));
     }
     if (input.auditFocus) form.append("audit_focus", input.auditFocus);
+    if (input.outputLanguage) form.append("output_language", input.outputLanguage);
+    if (input.vulnFocus) form.append("vuln_focus", input.vulnFocus);
     if (input.enableDynamicVerify != null) {
       form.append("enable_dynamic_verify", input.enableDynamicVerify ? "true" : "false");
     }

@@ -326,6 +326,8 @@ async function dispatchOnce(concurrency: number): Promise<void> {
         max_items_per_recon: number;
         agent_max_parallel: number;
         audit_focus: string | null;
+        output_language: string;
+        vuln_focus: string | null;
         enable_dynamic_verify: boolean;
         enable_dynamic_exploit: boolean;
       };
@@ -345,6 +347,8 @@ async function dispatchOnce(concurrency: number): Promise<void> {
         maxItemsPerRecon: dbConfig?.max_items_per_recon ?? envC.maxItemsPerRecon,
         agentMaxParallel: dbConfig?.agent_max_parallel ?? envC.agentMaxParallel,
         auditFocus: dbConfig?.audit_focus ?? envC.auditFocus,
+        outputLanguage: dbConfig?.output_language ?? "en",
+        vulnFocus: dbConfig?.vuln_focus ?? undefined,
         enableDynamicVerify: dbConfig?.enable_dynamic_verify ?? envC.enableDynamicVerify,
         enableDynamicExploit: dbConfig?.enable_dynamic_exploit ?? envC.enableDynamicExploit,
       };
