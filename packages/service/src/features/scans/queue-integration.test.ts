@@ -139,4 +139,26 @@ describe("scan queue integration", () => {
     expect(failed?.state).toBe("failed");
     expect(failed?.fail_reason_internal ?? "").toMatch(/vh_state:failed/);
   });
+
+  it("hardDeleteGoneJob removes sole job + project; keeps project if other jobs remain", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/cancel-hard-del" });
+    const only = await scanStorage.createScanJob(projectId, "sha-only");
+    const r1 = await scanStorage.hardDeleteGoneJob(only.id, projectId);
+    expect(r1.projectDeleted).toBe(true);
+    expect(await scanStorage.getScanJob(only.id)).toBeNull();
+    const db = (await import("../../infra/db/index.js")).getDb();
+    const gone = await db`SELECT id FROM projects WHERE id = ${projectId}::uuid`;
+    expect(gone.length).toBe(0);
+
+    const p2 = await seedProject({ fullName: "acme/cancel-hard-keep" });
+    const keep = await scanStorage.createScanJob(p2.projectId, "sha-keep");
+    await scanStorage.approveScanJob(keep.id);
+    const drop = await scanStorage.createScanJob(p2.projectId, "sha-drop");
+    const r2 = await scanStorage.hardDeleteGoneJob(drop.id, p2.projectId);
+    expect(r2.projectDeleted).toBe(false);
+    expect(await scanStorage.getScanJob(drop.id)).toBeNull();
+    expect(await scanStorage.getScanJob(keep.id)).not.toBeNull();
+    const still = await db`SELECT id FROM projects WHERE id = ${p2.projectId}::uuid`;
+    expect(still.length).toBe(1);
+  });
 });

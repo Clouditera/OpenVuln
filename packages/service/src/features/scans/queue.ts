@@ -777,21 +777,28 @@ export async function adminResyncScanJob(
   return { ok: true, publicCount };
 }
 
-/** Cancel a scanning job by deleting its VH task (then mark cancelled). */
-export async function cancelScanJobVh(
-  jobId: string,
-  vhTaskId: string,
-): Promise<void> {
+/** Delete VH task only (no OV row change). 404 acceptable. */
+export async function deleteVhTaskOnly(vhTaskId: string): Promise<void> {
   const vh = getVulnHunterClient();
   try {
     await vh.deleteTask(vhTaskId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // 404 / task_not_found = already deleted, acceptable
     if (!msg.includes("not_found") && !msg.includes("404")) {
       throw err;
     }
   }
+}
+
+/**
+ * @deprecated Prefer owner cancelScanJob (hard delete). Kept for callers that
+ * still want VH delete + markCancelled.
+ */
+export async function cancelScanJobVh(
+  jobId: string,
+  vhTaskId: string,
+): Promise<void> {
+  await deleteVhTaskOnly(vhTaskId);
   await storage.markCancelled(jobId, "cancelled_by_user");
   logger.info({ jobId, vhTaskId }, "Scan job cancelled (VH task deleted)");
 }

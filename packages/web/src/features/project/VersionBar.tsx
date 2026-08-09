@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, ChevronDown, CircleCheck, LoaderCircle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api, type ScanJobSummary } from "../../shared/api/client";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { formatRelativeTime, shortSha } from "../../shared/lib/format";
@@ -60,11 +61,20 @@ export function VersionBar({
     void qc.invalidateQueries({ queryKey: ["owner-findings", projectId] });
   };
 
+  const navigate = useNavigate();
   const cancelM = useMutation({
     mutationFn: (jobId: string) => api.cancelScanJob(projectId, jobId),
-    onSettled: () => {
+    onSuccess: (res) => {
       setCancelTarget(null);
+      if (res.deleted === "project") {
+        void qc.invalidateQueries({ queryKey: ["my-projects"] });
+        navigate("/my", { replace: true });
+        return;
+      }
       invalidateAll();
+    },
+    onError: () => {
+      setCancelTarget(null);
     },
   });
 
@@ -160,9 +170,9 @@ export function VersionBar({
 
       <ConfirmDialog
         open={cancelTarget !== null}
-        title="Cancel this scan?"
-        body={`The ${cancelTarget?.state === "scanning" ? "running" : "queued"} scan will be stopped and its VulnHunter slot released. This version can be resubmitted later.`}
-        confirmLabel="Cancel scan"
+        title="Remove this submission?"
+        body="This submission will be removed. You can submit the same repository again later."
+        confirmLabel="Remove submission"
         danger
         busy={cancelM.isPending}
         onConfirm={() => cancelTarget && cancelM.mutate(cancelTarget.id)}

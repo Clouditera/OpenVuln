@@ -271,18 +271,19 @@ export async function submitProject(
   return { project: await toCard(project, emptyCounts()) };
 }
 
-/** Cancel a scan job (owner action). Queued → immediate; scanning → VH delete. */
+/**
+ * Cancel a scan job (owner action).
+ * pending_review / queued / scanning → stop VH if needed, then hard-delete the job.
+ * If the project has no remaining jobs → hard-delete the project too.
+ * No cancelled shell left for users (fish No.1661).
+ */
 export async function cancelScanJob(
   projectId: string,
   jobId: string,
-): Promise<{ ok: true; state: string }> {
+): Promise<{ ok: true; deleted: "job" | "project" }> {
   const job = await scanStorage.getScanJob(jobId);
   if (!job || job.project_id !== projectId) {
     throw new AppError("ERR_NOT_FOUND", { resource: "scan_job" });
-  }
-  if (job.state === "pending_review" || job.state === "queued") {
-    const cancelled = await scanStorage.markCancelled(jobId, "cancelled_by_user");
-    return { ok: true, state: cancelled?.state ?? "cancelled" };
   }
   if (job.state === "dispatching") {
     throw new AppError("ERR_CONFLICT", {
@@ -290,29 +291,34 @@ export async function cancelScanJob(
       message: "Job is being dispatched, please retry in a moment.",
     });
   }
-  if (job.state === "scanning") {
-    if (job.vulnhunter_task_id) {
-      try {
-        const { cancelScanJobVh } = await import("../scans/queue.js");
-        await cancelScanJobVh(jobId, job.vulnhunter_task_id);
-      } catch (err) {
-        // VH delete failed — still cancel locally if 404 (task already gone)
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!msg.includes("not_found") && !msg.includes("404")) {
-          throw new AppError("ERR_UPSTREAM", {
-            reason: "vh_cancel_failed",
-            message: `Failed to cancel VulnHunter task: ${msg.slice(0, 200)}`,
-          });
-        }
+  if (
+    job.state !== "pending_review" &&
+    job.state !== "queued" &&
+    job.state !== "scanning"
+  ) {
+    throw new AppError("ERR_CONFLICT", {
+      reason: "already_terminal",
+      state: job.state,
+      message: `Job is already ${job.state}.`,
+    });
+  }
+
+  // scanning: best-effort stop VH first (404 ok)
+  if (job.state === "scanning" && job.vulnhunter_task_id) {
+    try {
+      const { deleteVhTaskOnly } = await import("../scans/queue.js");
+      await deleteVhTaskOnly(job.vulnhunter_task_id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("not_found") && !msg.includes("404")) {
+        throw new AppError("ERR_UPSTREAM", {
+          reason: "vh_cancel_failed",
+          message: `Failed to cancel VulnHunter task: ${msg.slice(0, 200)}`,
+        });
       }
     }
-    const cancelled = await scanStorage.markCancelled(jobId, "cancelled_by_user");
-    return { ok: true, state: cancelled?.state ?? "cancelled" };
   }
-  // Already terminal
-  throw new AppError("ERR_CONFLICT", {
-    reason: "already_terminal",
-    state: job.state,
-    message: `Job is already ${job.state}.`,
-  });
+
+  const { projectDeleted } = await scanStorage.hardDeleteGoneJob(jobId, projectId);
+  return { ok: true, deleted: projectDeleted ? "project" : "job" };
 }

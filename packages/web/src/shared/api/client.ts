@@ -248,7 +248,7 @@ export const api = {
   projectScans: (projectId: string) =>
     request<{ scans: ScanJobSummary[] }>(`/api/projects/${projectId}/scans`),
   cancelScanJob: (projectId: string, jobId: string) =>
-    request<{ ok: true; state: string }>(
+    request<{ ok: true; deleted: "job" | "project" }>(
       `/api/projects/${projectId}/scan-jobs/${jobId}/cancel`,
       { method: "POST" },
     ),

@@ -128,7 +128,8 @@ export async function hardDeleteGoneJob(
       WHERE id = ${projectId}::uuid
         AND current_scan_job_id = ${jobId}::uuid
     `;
-    // findings.scan_job_id has no ON DELETE CASCADE in 001 — delete findings first if any
+    // findings / artifacts: no full CASCADE on scan_job_id — delete dependents first
+    await tx`DELETE FROM finding_artifacts WHERE finding_id IN (SELECT id FROM findings WHERE scan_job_id = ${jobId}::uuid)`;
     await tx`DELETE FROM findings WHERE scan_job_id = ${jobId}::uuid`;
     await tx`DELETE FROM scan_jobs WHERE id = ${jobId}::uuid`;
     const remaining = await tx<{ n: string }[]>`

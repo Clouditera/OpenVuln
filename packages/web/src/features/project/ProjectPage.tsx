@@ -12,7 +12,7 @@ import {
   Shield,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { ReportBody } from "../../components/ReportBody";
@@ -477,11 +477,18 @@ function ScanProgressPage({
 }) {
   const qc = useQueryClient();
   const [cancelOpen, setCancelOpen] = useState(false);
+  const navigate = useNavigate();
   const cancelM = useMutation({
     mutationFn: () => api.cancelScanJob(projectId!, jobId!),
-    onSuccess: () => {
+    onSuccess: (res) => {
       setCancelOpen(false);
+      if (res.deleted === "project") {
+        void qc.invalidateQueries({ queryKey: ["my-projects"] });
+        navigate("/my", { replace: true });
+        return;
+      }
       void qc.invalidateQueries({ queryKey: ["public", "project"] });
+      void qc.invalidateQueries({ queryKey: ["owner-scans", projectId] });
     },
   });
   useEffect(() => {
@@ -638,9 +645,9 @@ function ScanProgressPage({
 
         <ConfirmDialog
           open={cancelOpen}
-          title="Cancel this scan?"
-          body="The scan will be stopped and its VulnHunter slot released. You can resubmit this version later."
-          confirmLabel="Cancel scan"
+          title="Remove this submission?"
+          body="This submission will be removed. You can submit the same repository again later."
+          confirmLabel="Remove submission"
           danger
           busy={cancelM.isPending}
           onConfirm={() => cancelM.mutate()}
