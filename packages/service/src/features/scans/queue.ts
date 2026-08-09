@@ -313,11 +313,13 @@ async function dispatchOnce(concurrency: number): Promise<void> {
       await storage.markFailed(job.id, "project_missing");
       continue;
     }
-    // VH display_name: no `/`, `#`, spaces (post-upgrade validation). Keep unique per attempt.
+    // VH display_name: Han/A-Za-z0-9/_/-/() only, max 64 (task-name.ts post-upgrade).
     const shortId = job.id.slice(0, 8);
     const attemptSuffix = job.attempt > 1 ? `-a${job.attempt}` : "";
-    const safeRepo = `${project.owner_login}-${project.name}`.replace(/[^a-zA-Z0-9._-]+/g, "-");
-    const displayName = `${safeRepo}-${shortId}${attemptSuffix}`.slice(0, 120);
+    const tail = `-${shortId}${attemptSuffix}`;
+    const safeRepo = `${project.owner_login}-${project.name}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
+    const maxRepo = Math.max(1, 64 - tail.length);
+    const displayName = `${safeRepo.slice(0, maxRepo)}${tail}`;
     attempted += 1;
     try {
       logger.info({ jobId: job.id, project: project.full_name }, "Dispatching scan job to VH");
