@@ -145,7 +145,7 @@ export function VersionBar({
           {inflight.state === "scanning" && (
             <span className="text-[12px]">{inflight.findings_so_far} so far</span>
           )}
-          {(inflight.state === "queued" || inflight.state === "scanning") && (
+          {(inflight.state === "pending_review" || inflight.state === "queued" || inflight.state === "scanning") && (
             <button
               type="button"
               onClick={() => setCancelTarget(inflight)}

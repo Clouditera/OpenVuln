@@ -105,7 +105,7 @@ export function ProjectPage() {
         justSubmitted={justSubmitted}
         projectId={project.id}
         jobId={project.latest_scan?.id}
-        canCancel={isOwner && (state === "queued" || state === "scanning")}
+        canCancel={isOwner && (state === "pending_review" || state === "queued" || state === "scanning")}
       />
     );
   }
