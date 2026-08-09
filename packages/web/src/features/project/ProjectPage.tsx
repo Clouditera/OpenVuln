@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Ban,
   ArrowUpRight,
   Check,
   ChevronDown,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { ReportBody } from "../../components/ReportBody";
 import { ScanDurationNotice } from "../../components/ScanDurationNotice";
@@ -101,6 +103,9 @@ export function ProjectPage() {
         state={state}
         findingsSoFar={soFar}
         justSubmitted={justSubmitted}
+        projectId={project.id}
+        jobId={project.latest_scan?.id}
+        canCancel={isOwner && (state === "queued" || state === "scanning")}
       />
     );
   }
@@ -454,6 +459,9 @@ function ScanProgressPage({
   state,
   findingsSoFar = 0,
   justSubmitted = false,
+  projectId,
+  jobId,
+  canCancel = false,
 }: {
   owner: string;
   repo: string;
@@ -462,7 +470,20 @@ function ScanProgressPage({
   state: "loading" | "pending_review" | "queued" | "dispatching" | "scanning";
   findingsSoFar?: number;
   justSubmitted?: boolean;
+  /** owner 取消入口（fish No.1454：进度页此前没有 Cancel） */
+  projectId?: string;
+  jobId?: string;
+  canCancel?: boolean;
 }) {
+  const qc = useQueryClient();
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const cancelM = useMutation({
+    mutationFn: () => api.cancelScanJob(projectId!, jobId!),
+    onSuccess: () => {
+      setCancelOpen(false);
+      void qc.invalidateQueries({ queryKey: ["public", "project"] });
+    },
+  });
   useEffect(() => {
     document.body.classList.add("openvuln-running");
     return () => document.body.classList.remove("openvuln-running");
@@ -531,14 +552,14 @@ function ScanProgressPage({
           {statusLabel}
         </h1>
 
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-sm text-[#acacb0]">
-          <span className="text-[#f0f2f6]">{owner}</span>
-          <span className="text-[#5f6067]">/</span>
-          <span className="text-[#f0f2f6]">{repo}</span>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-sm leading-none text-[#acacb0]">
+          <span className="leading-none text-[#f0f2f6]">{owner}</span>
+          <span className="leading-none text-[#5f6067]">/</span>
+          <span className="leading-none text-[#f0f2f6]">{repo}</span>
           {branch && (
             <>
-              <span className="text-[#5f6067]">·</span>
-              <span className="font-mono text-xs text-[#85868d]">{branch}</span>
+              <span className="leading-none text-[#5f6067]">·</span>
+              <span className="font-mono text-[13px] leading-none text-[#85868d]">{branch}</span>
             </>
           )}
         </div>
@@ -601,7 +622,30 @@ function ScanProgressPage({
           )}
         </div>
 
+        {canCancel && projectId && jobId && (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setCancelOpen(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[#333] bg-transparent px-3.5 text-xs font-medium text-[#acacb0] transition hover:border-[#a94d55] hover:text-[#ff9ca5] focus-ring-dark"
+            >
+              <Ban size={13} />
+              Cancel this scan
+            </button>
+          </div>
+        )}
         <ScanDurationNotice className="mt-4 w-full max-w-2xl" />
+
+        <ConfirmDialog
+          open={cancelOpen}
+          title="Cancel this scan?"
+          body="The scan will be stopped and its VulnHunter slot released. You can resubmit this version later."
+          confirmLabel="Cancel scan"
+          danger
+          busy={cancelM.isPending}
+          onConfirm={() => cancelM.mutate()}
+          onCancel={() => setCancelOpen(false)}
+        />
       </main>
     </div>
   );
