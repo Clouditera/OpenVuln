@@ -83,6 +83,7 @@ adminRouter.get("/projects", async (c) => {
       i.login AS submitter_login, i.avatar_url AS submitter_avatar,
       p.stars, p.language, p.default_branch, p.created_at,
       (SELECT s.state FROM scan_jobs s WHERE s.project_id = p.id ORDER BY s.created_at DESC LIMIT 1) AS latest_state,
+      (SELECT COUNT(*) FROM scan_jobs s WHERE s.project_id = p.id) AS scan_count,
       (SELECT COUNT(*) FROM findings f WHERE f.project_id = p.id AND f.scan_job_id = p.current_scan_job_id) AS finding_count
     FROM projects p
     LEFT JOIN github_identities i ON i.user_id = p.submitted_by
@@ -393,6 +394,11 @@ adminRouter.delete("/projects/:projectId", async (c) => {
   const projectId = c.req.param("projectId");
   const { getDb } = await import("../../infra/db/index.js");
   const db = getDb();
+  // Delete in dependency order (findings + scan_jobs have NO ACTION FK)
+  await db`DELETE FROM finding_artifacts WHERE project_id = ${projectId}::uuid`;
+  await db`DELETE FROM findings WHERE project_id = ${projectId}::uuid`;
+  await db`DELETE FROM scan_jobs WHERE project_id = ${projectId}::uuid`;
+  await db`DELETE FROM notifications WHERE payload->>'project_id' = ${projectId}`;
   const rows = await db<{ id: string }[]>`
     DELETE FROM projects WHERE id = ${projectId}::uuid RETURNING id::text
   `;
@@ -415,6 +421,50 @@ adminRouter.delete("/scan-jobs/:jobId", async (c) => {
   if (rows.length === 0) throw new AppError("ERR_CONFLICT", { reason: "not_deletable", message: "Only failed/cancelled/rejected jobs can be deleted" });
   logger.info({ jobId }, "Admin deleted terminal scan job");
   return c.json({ ok: true });
+});
+
+// GET /api/admin/projects/:id — project detail with scan history
+adminRouter.get("/projects/:projectId", async (c) => {
+  const projectId = c.req.param("projectId");
+  const { getDb } = await import("../../infra/db/index.js");
+  const db = getDb();
+
+  const project = await db<
+    Array<{ id: string; full_name: string; html_url: string; submitted_by: number | null; login: string | null; avatar_url: string | null; stars: number; language: string | null; default_branch: string; created_at: Date }>
+  >`
+    SELECT p.id::text, p.full_name, p.html_url, p.submitted_by,
+           i.login, i.avatar_url, p.stars, p.language, p.default_branch, p.created_at
+    FROM projects p
+    LEFT JOIN github_identities i ON i.user_id = p.submitted_by
+    WHERE p.id = ${projectId}::uuid
+  `;
+  if (project.length === 0) throw new AppError("ERR_NOT_FOUND", { resource: "project" });
+
+  const scans = await db<
+    Array<{ id: string; state: string; commit_sha: string | null; git_ref: string | null; findings_so_far: number; created_at: Date; started_at: Date | null; finished_at: Date | null; finding_count: number; fail_reason: string | null }>
+  >`
+    SELECT
+      s.id::text, s.state, s.commit_sha, s.git_ref,
+      COALESCE(s.findings_so_far, 0) AS findings_so_far,
+      s.created_at, s.started_at, s.finished_at,
+      (SELECT count(*) FROM findings f WHERE f.scan_job_id = s.id) AS finding_count,
+      s.fail_reason_internal AS fail_reason
+    FROM scan_jobs s
+    WHERE s.project_id = ${projectId}::uuid
+    ORDER BY s.created_at DESC
+  `;
+
+  return c.json({
+    ...project[0],
+    created_at: project[0].created_at.toISOString(),
+    scans: scans.map((s) => ({
+      ...s,
+      created_at: s.created_at.toISOString(),
+      started_at: s.started_at?.toISOString() ?? null,
+      finished_at: s.finished_at?.toISOString() ?? null,
+      finding_count: Number(s.finding_count),
+    })),
+  });
 });
 
 // GET /api/admin/projects/:id/report-package — plaintext package (legacy path kept)
