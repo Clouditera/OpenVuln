@@ -90,7 +90,7 @@ export function ProjectRow({ project }: { project: ProjectCard }) {
                     {soFar > 0 ? `Scanning · ${soFar} findings so far` : "Scanning…"}
                   </span>
                 ) : waiting ? (
-                  <span className="text-[13px] text-ink-tertiary">In scan queue</span>
+                  <span className="text-[13px] text-ink-tertiary">In review</span>
                 ) : (
                   <SeverityBar
                     counts={project.severity_counts}

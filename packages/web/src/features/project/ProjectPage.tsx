@@ -124,7 +124,7 @@ export function ProjectPage() {
           className="mt-4 rounded-md border border-accent-100 bg-accent-50 px-4 py-3 text-sm text-accent-700"
           role="status"
         >
-          Added to the scan queue.
+          Submitted for review.
         </div>
       )}
 
@@ -219,7 +219,7 @@ export function ProjectPage() {
           )}
 
           {state !== "completed" && !scanning && (
-            <p className="mt-8 text-sm text-ink-secondary">This project is in the scan queue.</p>
+            <p className="mt-8 text-sm text-ink-secondary">This project is in review.</p>
           )}
 
           {state === "completed" && (

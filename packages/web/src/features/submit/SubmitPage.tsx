@@ -61,7 +61,7 @@ export function SubmitPage() {
         <ol className="mt-4 space-y-3 text-sm text-ink-secondary">
           {[
             "We verify your GitHub role on the repository (admin or maintain)",
-            "Our team reviews the submission — approved projects enter the scan queue",
+            "Our team reviews the submission — approved projects start scanning",
             "VulnHunter scans the default branch",
             "You review full findings and choose what to disclose publicly",
           ].map((step, i) => (
