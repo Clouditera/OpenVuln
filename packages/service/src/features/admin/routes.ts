@@ -9,6 +9,7 @@ import { projectStorage } from "../projects/index.js";
 import { scanStorage } from "../scans/index.js";
 import { adminResyncScanJob, setRuntimeConcurrency } from "../scans/queue.js";
 import { type ImportBody, importFindingsPackage } from "./import-run.js";
+import { writeAudit, listAudit } from "./audit.js";
 
 export const adminRouter = new Hono();
 
@@ -203,6 +204,7 @@ adminRouter.post("/scan-jobs/:jobId/approve", async (c) => {
     });
   }
   logger.info({ jobId: job.id }, "Admin approved scan job → queued");
+  await writeAudit("approve", "scan_job", job.id, { state: job.state, project_id: job.project_id });
   return c.json({ id: job.id, state: job.state });
 });
 
@@ -263,6 +265,7 @@ adminRouter.post("/scan-jobs/:jobId/reject", async (c) => {
   `;
 
   logger.info({ jobId: job.id }, "Admin rejected scan job + cleanup");
+  await writeAudit("reject", "scan_job", jobId, { reason, project_id: job.project_id });
   return c.json({ id: jobId, state: "rejected" });
 });
 
@@ -291,6 +294,7 @@ adminRouter.post("/scan-jobs/:jobId/finalize", async (c) => {
       state: existing.state,
     });
   }
+  await writeAudit("finalize", "scan_job", job.id, { state: job.state, reason });
   return c.json({
     id: job.id,
     state: job.state,
@@ -404,6 +408,7 @@ adminRouter.delete("/projects/:projectId", async (c) => {
   `;
   if (rows.length === 0) throw new AppError("ERR_NOT_FOUND", { resource: "project" });
   logger.info({ projectId }, "Admin hard-deleted project");
+  await writeAudit("delete_project", "project", projectId, {});
   return c.json({ ok: true });
 });
 
@@ -423,6 +428,7 @@ adminRouter.delete("/scan-jobs/:jobId", async (c) => {
   await db`DELETE FROM findings WHERE scan_job_id = ${jobId}::uuid`;
   await db`DELETE FROM scan_jobs WHERE id = ${jobId}::uuid`;
   logger.info({ jobId }, "Admin deleted terminal scan job");
+  await writeAudit("delete_scan_job", "scan_job", jobId, { project_id: job[0].project_id });
   return c.json({ ok: true });
 });
 
@@ -619,5 +625,157 @@ adminRouter.post("/findings/:findingId/undisclose", async (c) => {
   if (rows.length === 0) {
     throw new AppError("ERR_NOT_FOUND", { resource: "finding", reason: "not_disclosed" });
   }
+  await writeAudit("undisclose", "finding", findingId, {});
   return c.json({ ok: true, finding_id: findingId });
 });
+
+// POST /api/admin/scan-jobs/:id/set-current — set project.current_scan_job_id to this completed job
+adminRouter.post("/scan-jobs/:jobId/set-current", async (c) => {
+  const jobId = c.req.param("jobId");
+  const job = await scanStorage.getScanJob(jobId);
+  if (!job) throw new AppError("ERR_NOT_FOUND", { resource: "scan_job" });
+  if (job.state !== "completed") {
+    throw new AppError("ERR_CONFLICT", { reason: "not_completed", state: job.state });
+  }
+  await scanStorage.setCurrentScanJob(job.project_id, jobId);
+  await writeAudit("set_current", "scan_job", jobId, { project_id: job.project_id });
+  return c.json({ ok: true, project_id: job.project_id, current_scan_job_id: jobId });
+});
+
+// GET /api/admin/scan-jobs/:id/findings — findings for a specific scan version
+adminRouter.get("/scan-jobs/:jobId/findings", async (c) => {
+  const jobId = c.req.param("jobId");
+  const job = await scanStorage.getScanJob(jobId);
+  if (!job) throw new AppError("ERR_NOT_FOUND", { resource: "scan_job" });
+  const findings = await findingsStorage.listAllForOwner(job.project_id, jobId);
+  return c.json({
+    job_id: jobId,
+    project_id: job.project_id,
+    state: job.state,
+    findings: findings.map((f) => ({
+      id: f.id,
+      finding_key: f.finding_key,
+      severity: f.severity,
+      title: f.title,
+      cwe: f.cwe,
+      primary_file: f.primary_file,
+      disclosure_state: f.disclosure_state,
+      cvss_score: f.cvss_score,
+      poc_status: f.poc_status,
+    })),
+  });
+});
+
+// GET /api/admin/search — search jobs by vh_task_id / commit / project name
+adminRouter.get("/search", async (c) => {
+  const q = (c.req.query("q") ?? "").trim();
+  if (!q || q.length < 2) {
+    throw new AppError("ERR_VALIDATION", { field: "q", reason: "min_2_chars" });
+  }
+  const db = (await import("../../infra/db/index.js")).getDb();
+  const like = `%${q}%`;
+  const jobs = await db`
+    SELECT
+      j.id::text, j.project_id::text, j.state, j.commit_sha, j.git_ref,
+      j.vulnhunter_task_id::text, j.created_at,
+      p.full_name
+    FROM scan_jobs j
+    JOIN projects p ON p.id = j.project_id
+    WHERE j.vulnhunter_task_id::text ILIKE ${like}
+       OR j.commit_sha ILIKE ${like}
+       OR p.full_name ILIKE ${like}
+       OR j.id::text ILIKE ${like}
+    ORDER BY j.created_at DESC
+    LIMIT 50
+  `;
+  return c.json({
+    items: jobs.map((j: any) => ({
+      ...j,
+      created_at: j.created_at?.toISOString?.() ?? j.created_at,
+    })),
+  });
+});
+
+// POST /api/admin/batch — batch operations
+// Body: { action: "approve"|"reject"|"delete_jobs"|"delete_projects"|"finalize", ids: string[], reason?: string }
+adminRouter.post("/batch", async (c) => {
+  let body: { action?: string; ids?: string[]; reason?: string };
+  try {
+    body = (await c.req.json()) as { action?: string; ids?: string[]; reason?: string };
+  } catch {
+    throw new AppError("ERR_VALIDATION", { reason: "invalid_json" });
+  }
+  const action = body.action;
+  const ids = Array.isArray(body.ids) ? body.ids.filter((x) => typeof x === "string") : [];
+  if (!action || ids.length === 0) {
+    throw new AppError("ERR_VALIDATION", { reason: "action_and_ids_required" });
+  }
+  if (ids.length > 50) {
+    throw new AppError("ERR_VALIDATION", { reason: "max_50_ids" });
+  }
+
+  const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+  const db = (await import("../../infra/db/index.js")).getDb();
+
+  for (const id of ids) {
+    try {
+      if (action === "approve") {
+        const job = await scanStorage.approveScanJob(id);
+        if (!job) throw new Error("not_pending_review");
+        await writeAudit("batch_approve", "scan_job", id, {});
+        results.push({ id, ok: true });
+      } else if (action === "reject") {
+        const job = await scanStorage.rejectScanJob(id, body.reason ?? null);
+        if (!job) throw new Error("not_pending_review");
+        await db`DELETE FROM scan_jobs WHERE id = ${id}::uuid`;
+        await db`DELETE FROM projects WHERE id = ${job.project_id}::uuid
+          AND NOT EXISTS (SELECT 1 FROM scan_jobs WHERE project_id = ${job.project_id}::uuid)`;
+        await writeAudit("batch_reject", "scan_job", id, { reason: body.reason ?? null });
+        results.push({ id, ok: true });
+      } else if (action === "delete_jobs") {
+        const job = await db<{ id: string }[]>`
+          SELECT id::text FROM scan_jobs
+          WHERE id = ${id}::uuid AND state IN ('failed', 'cancelled', 'rejected')
+        `;
+        if (job.length === 0) throw new Error("not_deletable");
+        await db`DELETE FROM finding_artifacts WHERE finding_id IN (SELECT id FROM findings WHERE scan_job_id = ${id}::uuid)`;
+        await db`DELETE FROM findings WHERE scan_job_id = ${id}::uuid`;
+        await db`DELETE FROM scan_jobs WHERE id = ${id}::uuid`;
+        await writeAudit("batch_delete_job", "scan_job", id, {});
+        results.push({ id, ok: true });
+      } else if (action === "delete_projects") {
+        await db`DELETE FROM finding_artifacts WHERE project_id = ${id}::uuid`;
+        await db`DELETE FROM findings WHERE project_id = ${id}::uuid`;
+        await db`DELETE FROM scan_jobs WHERE project_id = ${id}::uuid`;
+        await db`DELETE FROM notifications WHERE payload->>'project_id' = ${id}`;
+        const rows = await db`DELETE FROM projects WHERE id = ${id}::uuid RETURNING id::text`;
+        if (rows.length === 0) throw new Error("not_found");
+        await writeAudit("batch_delete_project", "project", id, {});
+        results.push({ id, ok: true });
+      } else if (action === "finalize") {
+        const job = await scanStorage.finalizeInFlight(id, body.reason ?? "batch_finalize");
+        if (!job) throw new Error("not_in_flight");
+        await writeAudit("batch_finalize", "scan_job", id, {});
+        results.push({ id, ok: true });
+      } else {
+        throw new Error(`unknown_action:${action}`);
+      }
+    } catch (e) {
+      results.push({ id, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  await writeAudit("batch", "batch", null, { action, count: ids.length, ok: results.filter((r) => r.ok).length });
+  return c.json({ results });
+});
+
+// GET /api/admin/audit-log
+adminRouter.get("/audit-log", async (c) => {
+  const page = Number(c.req.query("page") ?? "1");
+  const perPage = Number(c.req.query("per_page") ?? "50");
+  const action = c.req.query("action") ?? null;
+  const targetType = c.req.query("target_type") ?? null;
+  const result = await listAudit({ page, perPage, action, targetType });
+  return c.json(result);
+});
+
