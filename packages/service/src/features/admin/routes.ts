@@ -169,25 +169,20 @@ adminRouter.post("/scan-jobs/:jobId/reject", async (c) => {
   const { getDb } = await import("../../infra/db/index.js");
   const db = getDb();
   const submitter = await db<
-    Array<{ login: string | null; email: string | null }>
+    Array<{ login: string | null; email: string | null; full_name: string }>
   >`
-    SELECT i.login, u.email
-    FROM projects p
-    LEFT JOIN github_identities i ON i.user_id = p.submitted_by
-    LEFT JOIN users u ON u.github_user_id = p.submitted_by
-    WHERE p.id = ${job.project_id}::uuid
+    SELECT i.login, i.email, p2.full_name
+    FROM projects p2
+    LEFT JOIN github_identities i ON i.user_id = p2.submitted_by
+    WHERE p2.id = ${job.project_id}::uuid
     LIMIT 1
   `;
-  const projectMeta = await db<
-    Array<{ full_name: string }>
-  >`
-    SELECT full_name FROM projects WHERE id = ${job.project_id}::uuid LIMIT 1
-  `;
   const email = submitter[0]?.email;
+  const fullName = submitter[0]?.full_name ?? "your project";
   if (email) {
     await sendRejectionEmail({
       to: email,
-      projectName: projectMeta[0]?.full_name ?? "your project",
+      projectName: fullName,
       reason,
     }).catch((err: unknown) =>
         logger.error({ err, jobId: job.id }, "Rejection email failed"),
