@@ -47,6 +47,66 @@ adminRouter.post("/import", async (c) => {
   }
 });
 
+// GET /api/admin/projects — paginated project list with filters
+adminRouter.get("/projects", async (c) => {
+  const page = Math.max(1, Number(c.req.query("page") ?? "1"));
+  const perPage = Math.min(100, Math.max(1, Number(c.req.query("per_page") ?? "20")));
+  const stateFilter = c.req.query("state") ?? null; // completed / scanning / etc
+  const submitterFilter = c.req.query("submitter") ?? null; // login
+  const search = c.req.query("q") ?? null; // project name search
+  const offset = (page - 1) * perPage;
+
+  const db = (await import("../../infra/db/index.js")).getDb();
+
+  const baseWhere = [] as string[];
+  const params = [] as unknown[];
+  let paramIdx = 1;
+
+  if (stateFilter) {
+    baseWhere.push(`latest_state = $${paramIdx++}`);
+    params.push(stateFilter);
+  }
+  if (submitterFilter) {
+    baseWhere.push(`i.login = $${paramIdx++}`);
+    params.push(submitterFilter);
+  }
+  if (search) {
+    baseWhere.push(`p.full_name ILIKE $${paramIdx++}`);
+    params.push(`%${search}%`);
+  }
+
+  const whereClause = baseWhere.length > 0 ? `WHERE ${baseWhere.join(" AND ")}` : "";
+
+  const rows = await db.unsafe(
+    `SELECT
+      p.id::text, p.full_name, p.html_url, p.submitted_by,
+      i.login AS submitter_login, i.avatar_url AS submitter_avatar,
+      p.stars, p.language, p.default_branch, p.created_at,
+      (SELECT s.state FROM scan_jobs s WHERE s.project_id = p.id ORDER BY s.created_at DESC LIMIT 1) AS latest_state,
+      (SELECT COUNT(*) FROM findings f WHERE f.project_id = p.id AND f.scan_job_id = p.current_scan_job_id) AS finding_count
+    FROM projects p
+    LEFT JOIN github_identities i ON i.user_id = p.submitted_by
+    ${whereClause}
+    ORDER BY p.created_at DESC
+    LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+    [...params, perPage + 1, offset] as (string | number)[],
+  );
+
+  const hasMore = rows.length > perPage;
+  const items = rows.slice(0, perPage);
+
+  return c.json({
+    items: items.map((r) => ({
+      ...r,
+      created_at: r.created_at?.toISOString?.() ?? r.created_at,
+      finding_count: Number(r.finding_count ?? 0),
+    })),
+    page,
+    per_page: perPage,
+    has_more: hasMore,
+  });
+});
+
 // GET /api/admin/queue
 adminRouter.get("/queue", async (c) => {
   const items = await scanStorage.listQueue();
