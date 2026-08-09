@@ -40,7 +40,7 @@ export function ProjectPage() {
     enabled: Boolean(owner && repo),
     refetchInterval: (q) => {
       const s = q.state.data?.latest_scan?.state;
-      if (s === "queued" || s === "dispatching" || s === "scanning") return 5000;
+      if (s === "pending_review" || s === "queued" || s === "dispatching" || s === "scanning") return 5000;
       return false;
     },
   });
@@ -91,7 +91,7 @@ export function ProjectPage() {
   const soFar = project.latest_scan?.findings_so_far ?? 0;
   const findingsTotal = totalFindings(project.severity_counts);
 
-  if (state === "queued" || scanning) {
+  if (state === "pending_review" || state === "queued" || scanning) {
     return (
       <ScanProgressPage
         owner={project.owner_login}
@@ -459,7 +459,7 @@ function ScanProgressPage({
   repo: string;
   htmlUrl?: string;
   branch?: string | null;
-  state: "loading" | "queued" | "dispatching" | "scanning";
+  state: "loading" | "pending_review" | "queued" | "dispatching" | "scanning";
   findingsSoFar?: number;
   justSubmitted?: boolean;
 }) {
@@ -468,22 +468,22 @@ function ScanProgressPage({
     return () => document.body.classList.remove("openvuln-running");
   }, []);
 
-  const queued = state === "queued";
+  const inReview = state === "pending_review" || state === "queued";
   const loading = state === "loading";
   const dispatching = state === "dispatching";
-  const currentStage = queued ? 0 : dispatching ? 1 : 2;
-  const stages = ["Queued", "Preparing", "Scanning", "Results"];
+  const currentStage = inReview ? 0 : dispatching ? 1 : 2;
+  const stages = ["In review", "Preparing", "Scanning", "Results"];
   const statusLabel = loading
     ? "Loading scan status"
-    : queued
-      ? "Waiting in scan queue"
+    : inReview
+      ? "Submission in review"
       : dispatching
         ? "Preparing the scan"
         : "AI security analysis in progress";
   const detail = loading
     ? "Retrieving the latest status…"
-    : queued
-      ? "The repository is queued and will start automatically when a scanner is available."
+    : inReview
+      ? "The OpenVuln team reviews new submissions before scanning. You'll receive an email with the result — approved projects start scanning automatically."
       : dispatching
         ? "OpenVuln is packaging the repository and handing it to an available scanner."
         : findingsSoFar > 0
@@ -525,7 +525,7 @@ function ScanProgressPage({
         </div>
 
         <p className="mt-7 font-mono text-[11px] uppercase tracking-[0.22em] text-[#85868d]">
-          {justSubmitted ? "Repository added" : "Live scan status"}
+          {justSubmitted ? "Submitted for review" : "Live scan status"}
         </p>
         <h1 className="openvuln-title mt-3 text-balance text-3xl font-medium leading-tight sm:text-5xl">
           {statusLabel}

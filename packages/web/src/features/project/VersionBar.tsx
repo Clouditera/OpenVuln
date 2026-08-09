@@ -32,7 +32,7 @@ export function VersionBar({
     queryKey: ["project-scans", projectId],
     queryFn: () => api.projectScans(projectId),
     refetchInterval: (q) =>
-      (q.state.data?.scans ?? []).some((s) => ["queued", "dispatching", "scanning"].includes(s.state))
+      (q.state.data?.scans ?? []).some((s) => ["pending_review", "queued", "dispatching", "scanning"].includes(s.state))
         ? 5000
         : false,
     retry: false,
@@ -69,7 +69,7 @@ export function VersionBar({
   });
 
   const scans = scansQ.data?.scans ?? [];
-  const inflight = scans.find((s) => ["queued", "dispatching", "scanning"].includes(s.state));
+  const inflight = scans.find((s) => ["pending_review", "queued", "dispatching", "scanning"].includes(s.state));
   const completed = scans.filter((s) => s.state === "completed");
   const current = completed[0] ?? null; // 列表按创建时间倒序
   const viewing = viewJob ?? (current ? { id: current.id, label: current.commit_sha?.slice(0, 7) ?? "current" } : null);
@@ -134,8 +134,14 @@ export function VersionBar({
       {/* 进行中状态 + Cancel */}
       {inflight && (
         <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-running/30 bg-running-bg px-3 text-running-ink">
-          <LoaderCircle size={13} className="animate-spin" />
-          <span className="text-[12px] font-medium capitalize">{inflight.state}</span>
+          <LoaderCircle size={13} className={inflight.state === "scanning" ? "animate-spin" : ""} />
+          <span className="text-[12px] font-medium">
+            {inflight.state === "pending_review" || inflight.state === "queued"
+              ? "In review"
+              : inflight.state === "dispatching"
+                ? "Preparing"
+                : "Scanning"}
+          </span>
           {inflight.state === "scanning" && (
             <span className="text-[12px]">{inflight.findings_so_far} so far</span>
           )}

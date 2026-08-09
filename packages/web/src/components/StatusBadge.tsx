@@ -28,10 +28,10 @@ export function StatusBadge({
       </span>
     );
   }
-  // queued / failed / null → Waiting（fish No.491：scanning 独立展示，failed 仍归 waiting）
+  // pending_review / queued / failed / null → 审核中（fish No.1341：待审与队列统一显示审核中，失败不外露）
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-sunken px-2 py-0.5 text-xs font-medium text-ink-secondary">
-      <Clock size={12} /> Waiting to be scanned
+      <Clock size={12} /> In review
     </span>
   );
 }
