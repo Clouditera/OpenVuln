@@ -28,7 +28,7 @@ export async function createScanJob(
   const db = getDb();
   const rows = await db<ScanJobRow[]>`
     INSERT INTO scan_jobs (project_id, state, commit_sha, git_ref)
-    VALUES (${projectId}::uuid, 'queued', ${commitSha}, ${gitRef})
+    VALUES (${projectId}::uuid, 'pending_review', ${commitSha}, ${gitRef})
     RETURNING
       id::text, project_id::text, vulnhunter_task_id::text,
       state, commit_sha, attempt, fail_reason_internal,
@@ -399,7 +399,7 @@ export async function findInFlight(projectId: string): Promise<ScanJobRow | null
       created_at, started_at, finished_at
     FROM scan_jobs
     WHERE project_id = ${projectId}::uuid
-      AND state IN ('queued', 'dispatching', 'scanning')
+      AND state IN ('pending_review', 'queued', 'dispatching', 'scanning')
     ORDER BY created_at DESC
     LIMIT 1
   `;
@@ -415,7 +415,7 @@ export async function markCancelled(id: string, reason: string | null = null): P
         fail_reason_internal = ${reason ? reason.slice(0, 2000) : 'cancelled_by_user'},
         finished_at = now()
     WHERE id = ${id}::uuid
-      AND state IN ('queued', 'dispatching', 'scanning')
+      AND state IN ('pending_review', 'queued', 'dispatching', 'scanning')
     RETURNING
       id::text, project_id::text, vulnhunter_task_id::text,
       state, commit_sha, attempt, fail_reason_internal,
@@ -457,4 +457,69 @@ export async function listAllScans(projectId: string): Promise<ScanJobRow[]> {
     WHERE project_id = ${projectId}::uuid
     ORDER BY created_at DESC
   `;
+}
+
+/** List all pending_review jobs (admin queue). */
+export async function listPendingReview(): Promise<
+  Array<ScanJobRow & { full_name: string; submitted_by: number | null }>
+> {
+  const db = getDb();
+  return db<
+    Array<ScanJobRow & { full_name: string; submitted_by: number | null }>
+  >`
+    SELECT
+      j.id::text, j.project_id::text, j.vulnhunter_task_id::text,
+      j.state, j.commit_sha, j.git_ref, j.attempt, j.fail_reason_internal,
+      COALESCE(j.findings_so_far, 0) AS findings_so_far,
+      COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
+      j.created_at, j.started_at, j.finished_at,
+      p.full_name, p.submitted_by
+    FROM scan_jobs j
+    JOIN projects p ON p.id = j.project_id
+    WHERE j.state = 'pending_review'
+    ORDER BY j.created_at ASC
+  `;
+}
+
+/** Approve: pending_review → queued. */
+export async function approveScanJob(
+  jobId: string,
+): Promise<ScanJobRow | null> {
+  const db = getDb();
+  const rows = await db<ScanJobRow[]>`
+    UPDATE scan_jobs
+    SET state = 'queued'
+    WHERE id = ${jobId}::uuid
+      AND state = 'pending_review'
+    RETURNING
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+  `;
+  return rows[0] ?? null;
+}
+
+/** Reject: pending_review → rejected (terminal). */
+export async function rejectScanJob(
+  jobId: string,
+  reason: string | null,
+): Promise<ScanJobRow | null> {
+  const db = getDb();
+  const rows = await db<ScanJobRow[]>`
+    UPDATE scan_jobs
+    SET state = 'rejected',
+        fail_reason_internal = ${reason ? reason.slice(0, 2000) : 'rejected_by_admin'},
+        finished_at = now()
+    WHERE id = ${jobId}::uuid
+      AND state = 'pending_review'
+    RETURNING
+      id::text, project_id::text, vulnhunter_task_id::text,
+      state, commit_sha, attempt, fail_reason_internal,
+      COALESCE(findings_so_far, 0) AS findings_so_far,
+      COALESCE(consecutive_failures, 0) AS consecutive_failures,
+      created_at, started_at, finished_at
+  `;
+  return rows[0] ?? null;
 }

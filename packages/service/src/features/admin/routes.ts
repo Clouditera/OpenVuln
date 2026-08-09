@@ -108,6 +108,105 @@ adminRouter.post("/scan-jobs/:jobId/resync", async (c) => {
 });
 
 /**
+ * GET /api/admin/pending-reviews — list jobs awaiting review.
+ */
+adminRouter.get("/pending-reviews", async (c) => {
+  const items = await scanStorage.listPendingReview();
+  return c.json({
+    items: items.map((j) => ({
+      id: j.id,
+      project_id: j.project_id,
+      full_name: j.full_name,
+      submitted_by: j.submitted_by,
+      commit_sha: j.commit_sha,
+      git_ref: (j as { git_ref?: string | null }).git_ref ?? null,
+      created_at: j.created_at.toISOString(),
+    })),
+  });
+});
+
+/**
+ * POST /api/admin/scan-jobs/:id/approve — pending_review → queued.
+ */
+adminRouter.post("/scan-jobs/:jobId/approve", async (c) => {
+  const jobId = c.req.param("jobId");
+  const job = await scanStorage.approveScanJob(jobId);
+  if (!job) {
+    throw new AppError("ERR_NOT_FOUND", {
+      resource: "scan_job",
+      reason: "not_pending_review",
+    });
+  }
+  logger.info({ jobId: job.id }, "Admin approved scan job → queued");
+  return c.json({ id: job.id, state: job.state });
+});
+
+/**
+ * POST /api/admin/scan-jobs/:id/reject — pending_review → rejected + email + cleanup.
+ * Body optional: { reason?: string }
+ */
+adminRouter.post("/scan-jobs/:jobId/reject", async (c) => {
+  const jobId = c.req.param("jobId");
+  let reason: string | null = null;
+  try {
+    const body = (await c.req.json()) as { reason?: string };
+    if (typeof body?.reason === "string" && body.reason.trim()) {
+      reason = body.reason.trim().slice(0, 2000);
+    }
+  } catch {
+    /* empty body ok */
+  }
+  const job = await scanStorage.rejectScanJob(jobId, reason);
+  if (!job) {
+    throw new AppError("ERR_NOT_FOUND", {
+      resource: "scan_job",
+      reason: "not_pending_review",
+    });
+  }
+
+  // Send rejection email to submitter
+  const { sendRejectionEmail } = await import("../notifications/mailer.js");
+  const { getDb } = await import("../../infra/db/index.js");
+  const db = getDb();
+  const submitter = await db<
+    Array<{ login: string | null; email: string | null }>
+  >`
+    SELECT i.login, u.email
+    FROM projects p
+    LEFT JOIN github_identities i ON i.user_id = p.submitted_by
+    LEFT JOIN users u ON u.github_user_id = p.submitted_by
+    WHERE p.id = ${job.project_id}::uuid
+    LIMIT 1
+  `;
+  const projectMeta = await db<
+    Array<{ full_name: string }>
+  >`
+    SELECT full_name FROM projects WHERE id = ${job.project_id}::uuid LIMIT 1
+  `;
+  const email = submitter[0]?.email;
+  if (email) {
+    await sendRejectionEmail({
+      to: email,
+      projectName: projectMeta[0]?.full_name ?? "your project",
+      reason,
+    }).catch((err: unknown) =>
+        logger.error({ err, jobId: job.id }, "Rejection email failed"),
+      );
+  }
+
+  // Delete job + project (like VH gone cleanup)
+  await db`
+    DELETE FROM scan_jobs WHERE id = ${jobId}::uuid
+  `;
+  await db`
+    DELETE FROM projects WHERE id = ${job.project_id}::uuid
+  `;
+
+  logger.info({ jobId: job.id }, "Admin rejected scan job + cleanup");
+  return c.json({ id: jobId, state: "rejected" });
+});
+
+/**
  * POST /api/admin/scan-jobs/:id/finalize
  * Escape hatch: scanning|dispatching → failed (does not delete rows).
  * Body optional: { reason?: string }

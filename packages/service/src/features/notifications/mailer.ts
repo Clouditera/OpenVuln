@@ -153,3 +153,40 @@ export async function runMailerOnce(config: ServiceConfig): Promise<void> {
   if (!transport) return;
   await mailerTick(config.smtp.from || config.smtp.user);
 }
+
+let mailerFrom = "";
+
+export function setMailerFrom(from: string): void {
+  mailerFrom = from;
+}
+
+export function getFromAddress(): string {
+  return mailerFrom || "OpenVuln <noreply@openvuln.vulnhunter.pro>";
+}
+
+/** Send rejection email directly (not via queue). */
+export async function sendRejectionEmail(opts: {
+  to: string;
+  projectName: string;
+  reason: string | null;
+}): Promise<void> {
+  if (!transport) {
+    logger.warn("Mailer not initialized — cannot send rejection email");
+    return;
+  }
+  const lines = [
+    `Project: ${opts.projectName}`,
+    `Status: Your submission was not approved for scanning.`,
+  ];
+  if (opts.reason) {
+    lines.push(`Reason: ${opts.reason}`);
+  }
+  lines.push("", "You can submit another project at any time.", "", "— OpenVuln");
+  await transport.sendMail({
+    from: getFromAddress(),
+    to: opts.to,
+    subject: `[OpenVuln] ${opts.projectName} submission rejected`,
+    text: lines.join("\n"),
+  });
+  logger.info({ to: opts.to, project: opts.projectName }, "Rejection email sent");
+}

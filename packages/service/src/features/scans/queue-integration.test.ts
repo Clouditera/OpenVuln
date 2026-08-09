@@ -22,6 +22,7 @@ describe("scan queue integration", () => {
   it("dispatch → poll → findings filtered + NVD mapped", async () => {
     const { projectId } = await seedProject({ fullName: "acme/scan-me" });
     const job = await scanStorage.createScanJob(projectId, "deadbeef");
+    await scanStorage.approveScanJob(job.id);
 
     await scanQueueInternal.dispatchOnce(2);
     const afterDispatch = await scanStorage.getScanJob(job.id);
@@ -43,8 +44,8 @@ describe("scan queue integration", () => {
   it("respects concurrency slots", async () => {
     const a = await seedProject({ fullName: "acme/a", stars: 5 });
     const b = await seedProject({ fullName: "acme/b", stars: 5 });
-    await scanStorage.createScanJob(a.projectId, null);
-    await scanStorage.createScanJob(b.projectId, null);
+    await scanStorage.approveScanJob((await scanStorage.createScanJob(a.projectId, null)).id);
+    await scanStorage.approveScanJob((await scanStorage.createScanJob(b.projectId, null)).id);
 
     await scanQueueInternal.dispatchOnce(1);
     expect(await scanStorage.countInFlight()).toBe(1);
@@ -53,6 +54,7 @@ describe("scan queue integration", () => {
   it("VH task gone → hard-deletes job+project and frees slot", async () => {
     const { projectId } = await seedProject({ fullName: "acme/gone-me" });
     const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
     await scanQueueInternal.dispatchOnce(2);
     const scanning = await scanStorage.getScanJob(job.id);
     expect(scanning?.state).toBe("scanning");
@@ -70,6 +72,7 @@ describe("scan queue integration", () => {
   it("VH cancelled → keeps scanning (no fail)", async () => {
     const { projectId } = await seedProject({ fullName: "acme/cancel-me" });
     const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
     await scanQueueInternal.dispatchOnce(2);
     const scanning = await scanStorage.getScanJob(job.id);
     ctx.mockVh.forceState(scanning!.vulnhunter_task_id!, "cancelled");
@@ -82,6 +85,7 @@ describe("scan queue integration", () => {
   it("unknown VH state × grace → failed", async () => {
     const { projectId } = await seedProject({ fullName: "acme/weird-state" });
     const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
     await scanQueueInternal.dispatchOnce(2);
     const scanning = await scanStorage.getScanJob(job.id);
     ctx.mockVh.forceState(scanning!.vulnhunter_task_id!, "stopped_by_ops");
@@ -95,6 +99,7 @@ describe("scan queue integration", () => {
   it("admin finalize marks in-flight failed", async () => {
     const { projectId } = await seedProject({ fullName: "acme/finalize-me" });
     const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
     await scanQueueInternal.dispatchOnce(2);
     const done = await scanStorage.finalizeInFlight(job.id, "admin_finalize:test");
     expect(done?.state).toBe("failed");
@@ -104,6 +109,7 @@ describe("scan queue integration", () => {
   it("VH no-scan-value failure → completed empty (Scanned + 0)", async () => {
     const { projectId } = await seedProject({ fullName: "acme/empty-src" });
     const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
     await scanQueueInternal.dispatchOnce(2);
     const scanning = await scanStorage.getScanJob(job.id);
     ctx.mockVh.forceFailed(scanning!.vulnhunter_task_id!, {
@@ -122,6 +128,7 @@ describe("scan queue integration", () => {
   it("VH ordinary failure still marks failed after grace", async () => {
     const { projectId } = await seedProject({ fullName: "acme/real-fail" });
     const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
     await scanQueueInternal.dispatchOnce(2);
     const scanning = await scanStorage.getScanJob(job.id);
     ctx.mockVh.forceFailed(scanning!.vulnhunter_task_id!, {

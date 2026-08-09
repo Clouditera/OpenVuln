@@ -30,6 +30,7 @@ describe("plaintext + disclose e2e", () => {
   it("scan stores plaintext findings; package has title; disclose reveals publicly", async () => {
     const { projectId } = await seedProject({ fullName: "acme/crypto" });
     const job = await scanStorage.createScanJob(projectId, "deadbeef");
+    await scanStorage.approveScanJob(job.id);
     await scanQueueInternal.dispatchOnce(2);
     const after = await scanStorage.getScanJob(job.id);
     ctx.mockVh.forceState(after!.vulnhunter_task_id!, "completed");
@@ -107,6 +108,7 @@ describe("plaintext + disclose e2e", () => {
   it("C8b: retry/rescan keeps disclosed by stable finding_key", async () => {
     const { projectId, fullName } = await seedProject({ fullName: "acme/retain" });
     const job = await scanStorage.createScanJob(projectId, "sha1");
+    await scanStorage.approveScanJob(job.id);
     await scanQueueInternal.dispatchOnce(2);
     let row = await scanStorage.getScanJob(job.id);
     ctx.mockVh.forceState(row!.vulnhunter_task_id!, "completed");

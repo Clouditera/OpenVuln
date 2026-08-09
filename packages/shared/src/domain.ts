@@ -33,7 +33,15 @@ export function isPublicSeverity(s: string): s is Severity {
   return s === "critical" || s === "high" || s === "medium" || s === "low";
 }
 
-export type ScanJobState = "queued" | "dispatching" | "scanning" | "completed" | "failed" | "cancelled";
+export type ScanJobState =
+  | "pending_review"
+  | "queued"
+  | "dispatching"
+  | "scanning"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "rejected";
 
 export type DisclosureState = "owner_only" | "disclosed";
 

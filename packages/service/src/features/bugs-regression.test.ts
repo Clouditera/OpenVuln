@@ -27,6 +27,7 @@ describe("BUG regressions", () => {
   it("BUG-1: resync/retry does not double severity_counts", async () => {
     const { projectId } = await seedProject({ fullName: "acme/retry-me" });
     const job = await scanStorage.createScanJob(projectId, "sha1");
+    await scanStorage.approveScanJob(job.id);
 
     await scanQueueInternal.dispatchOnce(2);
     const after1 = await scanStorage.getScanJob(job.id);
@@ -91,8 +92,8 @@ describe("BUG regressions", () => {
   it("queue priority prefers higher stars", async () => {
     const low = await seedProject({ fullName: "acme/low", stars: 1 });
     const high = await seedProject({ fullName: "acme/high", stars: 99999 });
-    await scanStorage.createScanJob(low.projectId, null);
-    await scanStorage.createScanJob(high.projectId, null);
+    await scanStorage.approveScanJob((await scanStorage.createScanJob(low.projectId, null)).id);
+    await scanStorage.approveScanJob((await scanStorage.createScanJob(high.projectId, null)).id);
 
     await scanQueueInternal.dispatchOnce(1);
     const queue = await scanStorage.listQueue();
