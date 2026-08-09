@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import JSZip from "jszip";
 import { requireAuth } from "../../middleware/auth.js";
 import { AppError } from "../../middleware/error-handler.js";
 import { requireRepoAccess } from "../auth/permission.js";
@@ -151,25 +152,12 @@ projectsRouter.get("/:projectId/findings/:key", requireAuth, async (c) => {
   const finding = findings.find((f) => f.finding_key === key || f.id === key);
   if (!finding) throw new AppError("ERR_NOT_FOUND", { resource: "finding" });
   const artifacts = await listArtifactsForFinding(finding.id);
+  const reportYaml = findingsStorage.extractReportYaml(
+    finding.detail_json,
+    finding.report_yaml,
+  );
   let report = null;
-  if (finding.report_yaml) {
-    const p = parseReportYaml(finding.report_yaml);
-    if (p) {
-      report = {
-        metadata: p.metadata,
-        description: p.description,
-        code: p.code,
-        references: p.references,
-      };
-    }
-  }
-  // Prefer report_yaml from detail_json if disclosed_report_yaml empty
-  let reportYaml = finding.report_yaml;
-  if (!reportYaml && finding.detail_json && typeof finding.detail_json === "object") {
-    const d = finding.detail_json as Record<string, unknown>;
-    if (typeof d.report_yaml === "string") reportYaml = d.report_yaml;
-  }
-  if (!report && reportYaml) {
+  if (reportYaml) {
     const p = parseReportYaml(reportYaml);
     if (p) {
       report = {
@@ -243,20 +231,19 @@ projectsRouter.get("/:projectId/report-full", requireAuth, async (c) => {
       findings,
     });
   }
-  // default markdown pack
+
+  const slug = project.full_name.replace(/[^A-Za-z0-9._-]+/g, "-");
   const parts: string[] = [`# OpenVuln report — ${project.full_name}\n`];
+  const yamlByKey = new Map<string, string>();
   for (const f of findings) {
     parts.push(`\n## [${f.severity}] ${f.title}\n`);
     parts.push(`- key: \`${f.finding_key}\`\n`);
     parts.push(`- disclosure: ${f.disclosure_state}\n`);
     if (f.cwe) parts.push(`- cwe: ${f.cwe}\n`);
     if (f.primary_file) parts.push(`- file: \`${f.primary_file}\`\n`);
-    let yaml =
-      f.report_yaml ??
-      (f.detail_json && typeof f.detail_json === "object"
-        ? ((f.detail_json as Record<string, unknown>).report_yaml as string | undefined)
-        : undefined);
-    if (yaml && typeof yaml === "string") {
+    const yaml = findingsStorage.extractReportYaml(f.detail_json, f.report_yaml);
+    if (yaml) {
+      yamlByKey.set(f.finding_key, yaml);
       try {
         parts.push(
           "\n" +
@@ -271,13 +258,71 @@ projectsRouter.get("/:projectId/report-full", requireAuth, async (c) => {
       }
     }
   }
-  const body = parts.join("");
-  const filename = `openvuln-${project.full_name.replace(/[^A-Za-z0-9._-]+/g, "-")}-full.md`;
-  return new Response(body, {
+  const mdBody = parts.join("");
+
+  if (format === "zip") {
+    const zip = new JSZip();
+    zip.file("index.md", mdBody);
+    zip.file(
+      "index.json",
+      JSON.stringify(
+        {
+          project: { id: project.id, full_name: project.full_name },
+          findings: findings.map((f) => ({
+            finding_key: f.finding_key,
+            severity: f.severity,
+            title: f.title,
+            cwe: f.cwe,
+            primary_file: f.primary_file,
+            disclosure_state: f.disclosure_state,
+            cvss_score: f.cvss_score,
+            poc_status: f.poc_status,
+          })),
+        },
+        null,
+        2,
+      ),
+    );
+    const findingsDir = zip.folder("findings");
+    if (findingsDir) {
+      // Full plaintext pack (content_text) — listArtifactsForFinding omits body
+      const { listArtifactsForProject } = await import("../findings/artifacts-storage.js");
+      const allArts = await listArtifactsForProject(projectId);
+      const artsByFinding = new Map<string, typeof allArts>();
+      for (const a of allArts) {
+        const list = artsByFinding.get(a.finding_id) ?? [];
+        list.push(a);
+        artsByFinding.set(a.finding_id, list);
+      }
+      for (const f of findings) {
+        const dir = findingsDir.folder(f.finding_key.replace(/[^A-Za-z0-9._-]+/g, "-") || "item");
+        if (!dir) continue;
+        const yaml = yamlByKey.get(f.finding_key);
+        if (yaml) dir.file("report.yaml", yaml);
+        for (const a of artsByFinding.get(f.id) ?? []) {
+          if (a.content_text) {
+            dir.file(a.rel_path || a.file_name, a.content_text);
+          }
+        }
+      }
+    }
+    const buf = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+    return new Response(Buffer.from(buf), {
+      status: 200,
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": `attachment; filename="openvuln-${slug}-full.zip"`,
+        "cache-control": "no-store",
+      },
+    });
+  }
+
+  // default markdown pack
+  return new Response(mdBody, {
     status: 200,
     headers: {
       "content-type": "text/markdown; charset=utf-8",
-      "content-disposition": `attachment; filename="${filename}"`,
+      "content-disposition": `attachment; filename="openvuln-${slug}-full.md"`,
       "cache-control": "no-store",
     },
   });

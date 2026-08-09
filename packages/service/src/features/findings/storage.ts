@@ -166,8 +166,9 @@ export async function upsertEncryptedFinding(
   sql: SqlLike = getDb(),
 ): Promise<void> {
   const disclosureState = input.disclosureState ?? "owner_only";
-  const detailJson =
-    input.detailJson === undefined ? null : JSON.stringify(input.detailJson);
+  // Pass object directly — JSON.stringify + ::jsonb double-encodes as a JSON string scalar
+  // (BUG: disclosed report empty / owner expand blank). postgres.js serializes objects to jsonb.
+  const detailJson = input.detailJson === undefined ? null : input.detailJson;
   await sql`
     INSERT INTO findings (
       id, project_id, scan_job_id, finding_key, severity, cwe,
@@ -185,7 +186,7 @@ export async function upsertEncryptedFinding(
       ${input.encPayload ?? ""},
       ${input.title ?? null},
       ${input.primaryFile ?? null},
-      ${detailJson}::jsonb,
+      ${detailJson},
       ${disclosureState},
       ${input.disclosedAt ?? null},
       ${input.disclosedTitle ?? null},
@@ -272,6 +273,45 @@ export async function cweDistribution(
   }));
 }
 
+/**
+ * detail_json may be a real object, or a double-encoded JSON string scalar
+ * (legacy bug: JSON.stringify before ::jsonb). Always return a plain object.
+ */
+export function unwrapDetailJson(raw: unknown): Record<string, unknown> | null {
+  if (raw == null) return null;
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw === "string") {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Extract report.yaml text from unwrapped detail_json or disclosed column. */
+export function extractReportYaml(
+  detailJson: unknown,
+  disclosedYaml?: string | null,
+): string | null {
+  if (disclosedYaml && disclosedYaml.trim().length > 0) return disclosedYaml;
+  const d = unwrapDetailJson(detailJson);
+  if (!d) return null;
+  if (typeof d.report_yaml === "string" && d.report_yaml.trim()) return d.report_yaml;
+  const nested = d.detail;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const n = nested as Record<string, unknown>;
+    if (typeof n.report_yaml === "string" && n.report_yaml.trim()) return n.report_yaml;
+  }
+  return null;
+}
+
 export async function listDisclosedSummaries(projectId: string): Promise<
   Array<{
     id: string;
@@ -282,6 +322,8 @@ export async function listDisclosedSummaries(projectId: string): Promise<
     disclosed_at: Date | null;
     summary: string | null;
     report_yaml: string | null;
+    detail_json?: unknown;
+    primary_file?: string | null;
   }>
 > {
   const db = getDb();
@@ -317,18 +359,40 @@ export async function listDisclosedSummaries(projectId: string): Promise<
   };
   return (rows as unknown as DiscRow[])
     .filter((r) => isPublicSeverity(r.severity))
-    .map((r) => ({
-      id: r.id,
-      finding_key: r.finding_key,
-      severity: r.severity as Severity,
-      title: r.title ?? r.finding_key,
-      cwe: r.cwe,
-      disclosed_at: r.disclosed_at,
-      summary: r.disclosed_summary,
-      report_yaml: r.disclosed_report_yaml,
-      detail_json: r.detail_json ?? null,
-      primary_file: r.primary_file,
-    }));
+    .map((r) => {
+      const yaml = extractReportYaml(r.detail_json, r.disclosed_report_yaml);
+      let summary = r.disclosed_summary;
+      if (!summary) {
+        const d = unwrapDetailJson(r.detail_json);
+        const detail = d?.detail;
+        if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+          const desc = (detail as Record<string, unknown>).description;
+          if (desc && typeof desc === "object") {
+            const s = (desc as Record<string, unknown>).summary;
+            if (typeof s === "string" && s.trim()) summary = s.trim().slice(0, 500);
+          }
+          if (!summary) {
+            const meta = (detail as Record<string, unknown>).meta;
+            if (meta && typeof meta === "object") {
+              const vt = (meta as Record<string, unknown>).vuln_type;
+              if (typeof vt === "string") summary = vt;
+            }
+          }
+        }
+      }
+      return {
+        id: r.id,
+        finding_key: r.finding_key,
+        severity: r.severity as Severity,
+        title: r.title ?? r.finding_key,
+        cwe: r.cwe,
+        disclosed_at: r.disclosed_at,
+        summary,
+        report_yaml: yaml,
+        detail_json: unwrapDetailJson(r.detail_json) ?? r.detail_json ?? null,
+        primary_file: r.primary_file,
+      };
+    });
 }
 
 /** Owner view: all findings on current scan (including owner_only). */
@@ -366,19 +430,23 @@ export async function listAllForOwner(projectId: string, scanJobId?: string): Pr
       END,
       f.finding_key
   `;
-  return (rows as unknown as Array<Record<string, unknown>>).map((r) => ({
-    id: String(r.id),
-    finding_key: String(r.finding_key),
-    severity: r.severity as Severity,
-    title: String(r.title ?? r.finding_key),
-    cwe: (r.cwe as string) ?? null,
-    primary_file: (r.primary_file as string) ?? null,
-    disclosure_state: r.disclosure_state as DisclosureState,
-    detail_json: r.detail_json ?? null,
-    report_yaml: (r.disclosed_report_yaml as string) ?? null,
-    cvss_score: r.cvss_score != null ? Number(r.cvss_score) : null,
-    poc_status: (r.poc_status as string) ?? null,
-  }));
+  return (rows as unknown as Array<Record<string, unknown>>).map((r) => {
+    const detail = unwrapDetailJson(r.detail_json) ?? r.detail_json ?? null;
+    const discYaml = (r.disclosed_report_yaml as string) ?? null;
+    return {
+      id: String(r.id),
+      finding_key: String(r.finding_key),
+      severity: r.severity as Severity,
+      title: String(r.title ?? r.finding_key),
+      cwe: (r.cwe as string) ?? null,
+      primary_file: (r.primary_file as string) ?? null,
+      disclosure_state: r.disclosure_state as DisclosureState,
+      detail_json: detail,
+      report_yaml: extractReportYaml(detail, discYaml),
+      cvss_score: r.cvss_score != null ? Number(r.cvss_score) : null,
+      poc_status: (r.poc_status as string) ?? null,
+    };
+  });
 }
 
 export async function ownerDiscloseFindings(
@@ -387,15 +455,49 @@ export async function ownerDiscloseFindings(
 ): Promise<number> {
   if (findingIds.length === 0) return 0;
   const db = getDb();
+  // Unwrap double-encoded detail_json so ->>'report_yaml' works; also fill summary.
   const rows = await db`
     UPDATE findings f
     SET disclosure_state = 'disclosed',
         disclosed_at = COALESCE(f.disclosed_at, now()),
         disclosed_title = COALESCE(f.disclosed_title, f.title, f.finding_key),
+        detail_json = CASE
+          WHEN jsonb_typeof(f.detail_json) = 'string'
+            THEN (f.detail_json #>> '{}')::jsonb
+          ELSE f.detail_json
+        END,
         disclosed_report_yaml = COALESCE(
-          f.disclosed_report_yaml,
-          f.detail_json->>'report_yaml',
-          f.detail_json->'detail'->>'report_yaml'
+          NULLIF(f.disclosed_report_yaml, ''),
+          CASE
+            WHEN jsonb_typeof(f.detail_json) = 'string'
+              THEN ((f.detail_json #>> '{}')::jsonb)->>'report_yaml'
+            ELSE f.detail_json->>'report_yaml'
+          END,
+          CASE
+            WHEN jsonb_typeof(f.detail_json) = 'string'
+              THEN ((f.detail_json #>> '{}')::jsonb)->'detail'->>'report_yaml'
+            ELSE f.detail_json->'detail'->>'report_yaml'
+          END
+        ),
+        disclosed_summary = COALESCE(
+          NULLIF(f.disclosed_summary, ''),
+          left(
+            COALESCE(
+              CASE
+                WHEN jsonb_typeof(f.detail_json) = 'string'
+                  THEN ((f.detail_json #>> '{}')::jsonb)->'detail'->'description'->>'summary'
+                ELSE f.detail_json->'detail'->'description'->>'summary'
+              END,
+              CASE
+                WHEN jsonb_typeof(f.detail_json) = 'string'
+                  THEN ((f.detail_json #>> '{}')::jsonb)->'detail'->'meta'->>'vuln_type'
+                ELSE f.detail_json->'detail'->'meta'->>'vuln_type'
+              END,
+              f.title,
+              f.finding_key
+            ),
+            500
+          )
         )
     FROM projects p
     WHERE f.project_id = p.id
@@ -404,6 +506,47 @@ export async function ownerDiscloseFindings(
       AND f.id = ANY(${findingIds}::uuid[])
       AND f.disclosure_state = 'owner_only'
     RETURNING f.id
+  `;
+  return rows.length;
+}
+
+/** One-shot: fix double-encoded detail_json + backfill disclosed_report_yaml from it. */
+export async function repairDetailJsonEncoding(projectId?: string): Promise<number> {
+  const db = getDb();
+  const scope = projectId
+    ? db`AND project_id = ${projectId}::uuid`
+    : db``;
+  const rows = await db`
+    UPDATE findings
+    SET detail_json = (detail_json #>> '{}')::jsonb
+    WHERE jsonb_typeof(detail_json) = 'string'
+      ${scope}
+    RETURNING id
+  `;
+  // Backfill empty disclosed yaml from unwrapped detail
+  await db`
+    UPDATE findings
+    SET disclosed_report_yaml = COALESCE(
+          NULLIF(disclosed_report_yaml, ''),
+          detail_json->>'report_yaml',
+          detail_json->'detail'->>'report_yaml'
+        ),
+        disclosed_summary = COALESCE(
+          NULLIF(disclosed_summary, ''),
+          left(
+            COALESCE(
+              detail_json->'detail'->'description'->>'summary',
+              detail_json->'detail'->'meta'->>'vuln_type',
+              title,
+              finding_key
+            ),
+            500
+          )
+        )
+    WHERE disclosure_state = 'disclosed'
+      AND (disclosed_report_yaml IS NULL OR disclosed_report_yaml = '')
+      AND detail_json->>'report_yaml' IS NOT NULL
+      ${scope}
   `;
   return rows.length;
 }

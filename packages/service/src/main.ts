@@ -14,6 +14,15 @@ async function main(): Promise<void> {
   await initDb(config.db.url);
   await runMigrations();
 
+  // One-shot: unwrap double-encoded detail_json (JSON.stringify + ::jsonb legacy bug)
+  try {
+    const { findingsStorage } = await import("./features/findings/index.js");
+    const n = await findingsStorage.repairDetailJsonEncoding();
+    if (n > 0) logger.info({ repaired: n }, "Repaired double-encoded finding detail_json");
+  } catch (err) {
+    logger.warn({ err }, "detail_json repair skipped");
+  }
+
   initVulnHunterClient(config);
   // Prefer DB scan_concurrency when present (admin Settings); env is fallback only.
   try {

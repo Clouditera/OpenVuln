@@ -93,13 +93,22 @@ export function OwnerFindings({
         <h2 className="font-display text-base font-semibold text-ink">
           All findings ({findings.length})
         </h2>
-        <a
-          href={apiUrl(`/api/projects/${projectId}/report-full?format=md${viewJob ? `&scan_job_id=${viewJob.id}` : ""}`)}
-          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-surface-raised px-3.5 text-sm font-medium text-ink transition-colors hover:bg-surface-sunken focus-ring"
-          title="Download the complete report for all findings (markdown)"
-        >
-          <Download size={14} /> Full report (.md)
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={apiUrl(`/api/projects/${projectId}/report-full?format=zip${viewJob ? `&scan_job_id=${viewJob.id}` : ""}`)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-surface-raised px-3.5 text-sm font-medium text-ink transition-colors hover:bg-surface-sunken focus-ring"
+            title="Download full pack (yaml + artifacts) for all findings"
+          >
+            <Download size={14} /> Full pack (.zip)
+          </a>
+          <a
+            href={apiUrl(`/api/projects/${projectId}/report-full?format=md${viewJob ? `&scan_job_id=${viewJob.id}` : ""}`)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-surface-raised px-3.5 text-sm font-medium text-ink-secondary transition-colors hover:bg-surface-sunken focus-ring"
+            title="Download the complete report for all findings (markdown)"
+          >
+            <Download size={14} /> Full report (.md)
+          </a>
+        </div>
       </div>
 
       {viewingHistorical && (
