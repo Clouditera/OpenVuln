@@ -12,7 +12,7 @@ import * as artifactStorage from "../findings/artifacts-storage.js";
 import * as scanStorage from "../scans/storage.js";
 import * as projectStorage from "../projects/storage.js";
 import { parseGitHubUrl } from "../projects/github-sync.js";
-import { fetchDefaultBranchHeadSha, resolveRootRepo } from "../projects/github.js";
+import { fetchDefaultBranchHeadSha, fetchRepoMeta } from "../projects/github.js";
 
 export type ImportArtifact = {
   kind: "poc" | "exp" | "other";
@@ -195,7 +195,7 @@ export async function importFindingsPackage(body: ImportBody): Promise<{
     if (!body.repo) throw new Error("repo or project_id required");
     const parsed = parseGitHubUrl(body.repo);
     if (!parsed) throw new Error(`invalid repo: ${body.repo}`);
-    const { meta } = await resolveRootRepo(
+    const meta = await fetchRepoMeta(
       parsed.owner,
       parsed.repo,
       cfg.github.serverToken || undefined,

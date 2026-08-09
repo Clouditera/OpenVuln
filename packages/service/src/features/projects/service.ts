@@ -14,7 +14,7 @@ import { authStorage } from "../auth/index.js";
 import { findingsStorage } from "../findings/index.js";
 import { parseReportYaml } from "../report/yaml-render.js";
 import { type ScanJobRow, scanStorage } from "../scans/index.js";
-import { fetchDefaultBranchHeadSha, parseGitHubUrl, resolveRootRepo } from "./github-sync.js";
+import { fetchDefaultBranchHeadSha, fetchRepoMeta, parseGitHubUrl } from "./github-sync.js";
 import * as storage from "./storage.js";
 import type { ProjectRow } from "./storage.js";
 
@@ -158,7 +158,8 @@ export async function submitProject(
     });
   }
 
-  const { meta, wasFork } = await resolveRootRepo(
+  // Fetch repo meta directly (no fork resolution — forks treated as independent projects)
+  const meta = await fetchRepoMeta(
     parsed.owner,
     parsed.repo,
     config.github.serverToken,
@@ -171,8 +172,6 @@ export async function submitProject(
       message: "Only public repositories are accepted",
     });
   }
-
-  void wasFork;
 
   // Maintainer/admin only + daily rate limit
   await requireRepoAccess(user, meta.owner.login, meta.name, meta.id, config);
