@@ -412,23 +412,56 @@ adminRouter.delete("/projects/:projectId", async (c) => {
   return c.json({ ok: true });
 });
 
-// DELETE /api/admin/scan-jobs/:jobId — delete terminal scan job (failed/cancelled/rejected only)
+// DELETE /api/admin/scan-jobs/:jobId
+// Deletable: failed/cancelled/rejected, OR completed that is NOT the project's current version.
 adminRouter.delete("/scan-jobs/:jobId", async (c) => {
   const jobId = c.req.param("jobId");
   const { getDb } = await import("../../infra/db/index.js");
   const db = getDb();
-  // Verify terminal state first
-  const job = await db<{ id: string; project_id: string }[]>`
-    SELECT id::text, project_id::text FROM scan_jobs
-    WHERE id = ${jobId}::uuid AND state IN ('failed', 'cancelled', 'rejected')
+  const job = await db<{ id: string; project_id: string; state: string }[]>`
+    SELECT id::text, project_id::text, state FROM scan_jobs
+    WHERE id = ${jobId}::uuid
   `;
-  if (job.length === 0) throw new AppError("ERR_CONFLICT", { reason: "not_deletable", message: "Only failed/cancelled/rejected jobs can be deleted" });
+  if (job.length === 0) throw new AppError("ERR_NOT_FOUND", { resource: "scan_job" });
+
+  const row = job[0];
+  const terminal = ["failed", "cancelled", "rejected"].includes(row.state);
+  if (row.state === "completed") {
+    const proj = await db<{ current_scan_job_id: string | null }[]>`
+      SELECT current_scan_job_id::text FROM projects WHERE id = ${row.project_id}::uuid
+    `;
+    const isCurrent = proj[0]?.current_scan_job_id === jobId;
+    if (isCurrent) {
+      // Allow if this is the only completed version for the project
+      const others = await db<{ n: string }[]>`
+        SELECT count(*)::text AS n FROM scan_jobs
+        WHERE project_id = ${row.project_id}::uuid
+          AND state = 'completed'
+          AND id <> ${jobId}::uuid
+      `;
+      const otherCount = Number(others[0]?.n ?? 0);
+      if (otherCount > 0) {
+        throw new AppError("ERR_CONFLICT", {
+          reason: "is_current",
+          message: "Cannot delete the current version. Set another version as current first.",
+        });
+      }
+      // Unique completed version — clear current pointer then delete
+      await db`UPDATE projects SET current_scan_job_id = NULL WHERE id = ${row.project_id}::uuid`;
+    }
+  } else if (!terminal) {
+    throw new AppError("ERR_CONFLICT", {
+      reason: "not_deletable",
+      message: "Only failed/cancelled/rejected, or non-current completed jobs can be deleted",
+    });
+  }
+
   // Cascade: artifacts → findings → job
   await db`DELETE FROM finding_artifacts WHERE finding_id IN (SELECT id FROM findings WHERE scan_job_id = ${jobId}::uuid)`;
   await db`DELETE FROM findings WHERE scan_job_id = ${jobId}::uuid`;
   await db`DELETE FROM scan_jobs WHERE id = ${jobId}::uuid`;
-  logger.info({ jobId }, "Admin deleted terminal scan job");
-  await writeAudit("delete_scan_job", "scan_job", jobId, { project_id: job[0].project_id });
+  logger.info({ jobId, state: row.state }, "Admin deleted scan job");
+  await writeAudit("delete_scan_job", "scan_job", jobId, { project_id: row.project_id, state: row.state });
   return c.json({ ok: true });
 });
 
@@ -439,10 +472,11 @@ adminRouter.get("/projects/:projectId", async (c) => {
   const db = getDb();
 
   const project = await db<
-    Array<{ id: string; full_name: string; html_url: string; submitted_by: number | null; login: string | null; avatar_url: string | null; stars: number; language: string | null; default_branch: string; created_at: Date }>
+    Array<{ id: string; full_name: string; html_url: string; submitted_by: number | null; login: string | null; avatar_url: string | null; stars: number; language: string | null; default_branch: string; created_at: Date; current_scan_job_id: string | null }>
   >`
     SELECT p.id::text, p.full_name, p.html_url, p.submitted_by,
-           i.login, i.avatar_url, p.stars, p.language, p.default_branch, p.created_at
+           i.login, i.avatar_url, p.stars, p.language, p.default_branch, p.created_at,
+           p.current_scan_job_id::text
     FROM projects p
     LEFT JOIN github_identities i ON i.user_id = p.submitted_by
     WHERE p.id = ${projectId}::uuid
@@ -733,15 +767,31 @@ adminRouter.post("/batch", async (c) => {
         await writeAudit("batch_reject", "scan_job", id, { reason: body.reason ?? null });
         results.push({ id, ok: true });
       } else if (action === "delete_jobs") {
-        const job = await db<{ id: string }[]>`
-          SELECT id::text FROM scan_jobs
-          WHERE id = ${id}::uuid AND state IN ('failed', 'cancelled', 'rejected')
+        const job = await db<{ id: string; project_id: string; state: string }[]>`
+          SELECT id::text, project_id::text, state FROM scan_jobs WHERE id = ${id}::uuid
         `;
-        if (job.length === 0) throw new Error("not_deletable");
+        if (job.length === 0) throw new Error("not_found");
+        const row = job[0];
+        const terminal = ["failed", "cancelled", "rejected"].includes(row.state);
+        if (row.state === "completed") {
+          const proj = await db<{ current_scan_job_id: string | null }[]>`
+            SELECT current_scan_job_id::text FROM projects WHERE id = ${row.project_id}::uuid
+          `;
+          if (proj[0]?.current_scan_job_id === id) {
+            const others = await db<{ n: string }[]>`
+              SELECT count(*)::text AS n FROM scan_jobs
+              WHERE project_id = ${row.project_id}::uuid AND state = 'completed' AND id <> ${id}::uuid
+            `;
+            if (Number(others[0]?.n ?? 0) > 0) throw new Error("is_current");
+            await db`UPDATE projects SET current_scan_job_id = NULL WHERE id = ${row.project_id}::uuid`;
+          }
+        } else if (!terminal) {
+          throw new Error("not_deletable");
+        }
         await db`DELETE FROM finding_artifacts WHERE finding_id IN (SELECT id FROM findings WHERE scan_job_id = ${id}::uuid)`;
         await db`DELETE FROM findings WHERE scan_job_id = ${id}::uuid`;
         await db`DELETE FROM scan_jobs WHERE id = ${id}::uuid`;
-        await writeAudit("batch_delete_job", "scan_job", id, {});
+        await writeAudit("batch_delete_job", "scan_job", id, { state: row.state });
         results.push({ id, ok: true });
       } else if (action === "delete_projects") {
         await db`DELETE FROM finding_artifacts WHERE project_id = ${id}::uuid`;
