@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { LogIn, LogOut, ChevronDown, FolderGit2 } from "lucide-react";
+import { UserRound, LogOut, ChevronDown, FolderGit2 } from "lucide-react";
 import { navigateToLogin, navigateToLoginPopup, isEmbedded, currentReturnTo } from "../shared/api/client";
 import { useLogout, useMe } from "../features/auth/useAuth";
 
@@ -56,7 +56,7 @@ export function AuthButton({ appearance = "light" }: { appearance?: "light" | "d
             : "inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-sunken focus-ring"
         }
       >
-        <LogIn size={dark ? 14 : 15} />
+        <UserRound size={dark ? 14 : 15} />
         Sign in
       </button>
     );
