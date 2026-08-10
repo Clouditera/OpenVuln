@@ -169,7 +169,7 @@ export function ProjectPage() {
       </div>
 
       {/* Tabs */}
-      <div className="mt-4 flex gap-1 border-b border-line">
+      <div className="flex gap-1 border-b border-line">
         <TabButton active={tab === "overview"} onClick={() => setParams({})}>
           Overview
         </TabButton>
@@ -671,7 +671,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`-mb-px inline-flex items-center border-b-2 px-3 py-2.5 text-sm font-medium transition-colors focus-ring ${
+      className={`-mb-px inline-flex items-center border-b-2 px-3 py-4 text-sm font-medium transition-colors focus-ring ${
         active
           ? "border-accent-600 text-accent-700"
           : "border-transparent text-ink-secondary hover:text-ink"
