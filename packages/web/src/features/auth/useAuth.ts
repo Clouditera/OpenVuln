@@ -63,8 +63,10 @@ export function useLogout() {
     onSettled: () => {
       const anon: MeResponse = { authenticated: false, user: null };
       qc.setQueryData(["me"], anon);
-      // owner 视图数据全部作废
       qc.invalidateQueries({ queryKey: ["owner-findings"] });
+      // Hard navigation so SPA shell cannot keep a stale AuthButton tree
+      // (fish No.1785/1792: Sign in icon reverted to GitHub after soft logout).
+      window.location.assign("/");
     },
   });
 }

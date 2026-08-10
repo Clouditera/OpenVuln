@@ -41,7 +41,11 @@ export function AuthButton({ appearance = "light" }: { appearance?: "light" | "d
   if (!user) {
     return (
       <button
+        key="auth-anon"
         type="button"
+        data-auth-state="signed-out"
+        aria-label="Sign in"
+        title="Sign in"
         onClick={() => {
           if (isEmbedded()) {
             navigateToLoginPopup();
@@ -56,7 +60,8 @@ export function AuthButton({ appearance = "light" }: { appearance?: "light" | "d
             : "inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-sunken focus-ring"
         }
       >
-        <UserRound size={dark ? 14 : 15} />
+        {/* UserRound only — never Github (repo link is a separate control) */}
+        <UserRound size={dark ? 14 : 15} aria-hidden strokeWidth={2} />
         Sign in
       </button>
     );
