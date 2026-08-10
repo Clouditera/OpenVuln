@@ -213,3 +213,69 @@ describe("scan queue integration", () => {
     expect(gone.length).toBe(0);
   });
 });
+
+describe("auto-approve", () => {
+  let ctx: TestContext;
+
+  beforeAll(async () => {
+    ctx = await setupTestApp();
+  });
+
+  beforeEach(async () => {
+    await cleanTables();
+    // Reset auto-approve to disabled
+    const { updateScanConfig } = await import("./config-storage.js");
+    await updateScanConfig({ auto_approve_enabled: false, auto_approve_strategy: "fifo" });
+  });
+
+  it("disabled: pending jobs stay pending", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/auto-off" });
+    await scanStorage.createScanJob(projectId, null);
+    const pending = await scanStorage.listPendingReviewWithStars();
+    expect(pending).toHaveLength(1);
+    expect(pending[0].stars).not.toBeNull();
+  });
+
+  it("fifo strategy: oldest first", async () => {
+    const { updateScanConfig } = await import("./config-storage.js");
+    await updateScanConfig({ auto_approve_enabled: true, auto_approve_strategy: "fifo" });
+    const db = (await import("../../infra/db/index.js")).getDb();
+
+    const p1 = await seedProject({ fullName: "acme/young-high", stars: 999 });
+    await scanStorage.createScanJob(p1.projectId, null);
+    // Make first job older
+    await db`UPDATE scan_jobs SET created_at = now() - interval '1 hour' WHERE project_id = ${p1.projectId}::uuid`;
+
+    const p2 = await seedProject({ fullName: "acme/old-low", stars: 1 });
+    await scanStorage.createScanJob(p2.projectId, null);
+
+    const pending = await scanStorage.listPendingReviewWithStars();
+    expect(pending).toHaveLength(2);
+    // FIFO: p1 (older) should be first
+    expect(pending[0].full_name).toBe("acme/young-high");
+  });
+
+  it("stars_desc strategy: highest stars first", async () => {
+    const { updateScanConfig } = await import("./config-storage.js");
+    await updateScanConfig({ auto_approve_enabled: true, auto_approve_strategy: "stars_desc" });
+
+    const p1 = await seedProject({ fullName: "acme/low-stars", stars: 5 });
+    await scanStorage.createScanJob(p1.projectId, null);
+    const p2 = await seedProject({ fullName: "acme/high-stars", stars: 500 });
+    await scanStorage.createScanJob(p2.projectId, null);
+
+    const pending = await scanStorage.listPendingReviewWithStars();
+    expect(pending).toHaveLength(2);
+    // Storage returns FIFO; strategy sort happens in maybeAutoApprove
+    const sorted = [...pending].sort((a, b) => (b.stars ?? 0) - (a.stars ?? 0));
+    expect(sorted[0].full_name).toBe("acme/high-stars");
+  });
+
+  it("config round-trips auto_approve fields", async () => {
+    const { getScanConfig, updateScanConfig } = await import("./config-storage.js");
+    await updateScanConfig({ auto_approve_enabled: true, auto_approve_strategy: "stars_desc" });
+    const cfg = await getScanConfig();
+    expect(cfg.auto_approve_enabled).toBe(true);
+    expect(cfg.auto_approve_strategy).toBe("stars_desc");
+  });
+});

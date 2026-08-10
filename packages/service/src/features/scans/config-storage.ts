@@ -10,6 +10,8 @@ export interface ScanConfigRow {
   enable_dynamic_verify: boolean;
   enable_dynamic_exploit: boolean;
   scan_concurrency: number;
+  auto_approve_enabled: boolean;
+  auto_approve_strategy: "stars_desc" | "fifo";
 }
 
 export async function getScanConfig(): Promise<ScanConfigRow> {
@@ -18,7 +20,7 @@ export async function getScanConfig(): Promise<ScanConfigRow> {
     SELECT scan_timeout_hours, max_items_per_recon, agent_max_parallel,
            audit_focus, output_language, vuln_focus,
            enable_dynamic_verify, enable_dynamic_exploit,
-           scan_concurrency
+           scan_concurrency, auto_approve_enabled, auto_approve_strategy
     FROM scan_config WHERE id = 1
   `;
   return rows[0];
@@ -37,6 +39,8 @@ export async function updateScanConfig(
       | "enable_dynamic_verify"
       | "enable_dynamic_exploit"
       | "scan_concurrency"
+      | "auto_approve_enabled"
+      | "auto_approve_strategy"
     >
   >,
 ): Promise<ScanConfigRow> {
@@ -53,6 +57,17 @@ export async function updateScanConfig(
       throw err;
     }
   }
+  let strategy = updates.auto_approve_strategy ?? null;
+  if (strategy != null) {
+    const s = String(strategy).trim();
+    if (s !== "stars_desc" && s !== "fifo") {
+      const err = new Error(`invalid_auto_approve_strategy:${s}`);
+      (err as Error & { code?: string }).code = "ERR_VALIDATION";
+      throw err;
+    }
+    strategy = s;
+  }
+
   const rows = await db<ScanConfigRow[]>`
     UPDATE scan_config SET
       scan_timeout_hours = COALESCE(${updates.scan_timeout_hours ?? null}, scan_timeout_hours),
@@ -64,12 +79,14 @@ export async function updateScanConfig(
       enable_dynamic_verify = COALESCE(${updates.enable_dynamic_verify ?? null}, enable_dynamic_verify),
       enable_dynamic_exploit = COALESCE(${updates.enable_dynamic_exploit ?? null}, enable_dynamic_exploit),
       scan_concurrency = COALESCE(${updates.scan_concurrency ?? null}, scan_concurrency),
+      auto_approve_enabled = COALESCE(${updates.auto_approve_enabled ?? null}, auto_approve_enabled),
+      auto_approve_strategy = COALESCE(${strategy}, auto_approve_strategy),
       updated_at = now()
     WHERE id = 1
     RETURNING scan_timeout_hours, max_items_per_recon, agent_max_parallel,
               audit_focus, output_language, vuln_focus,
               enable_dynamic_verify, enable_dynamic_exploit,
-              scan_concurrency
+              scan_concurrency, auto_approve_enabled, auto_approve_strategy
   `;
   return rows[0];
 }

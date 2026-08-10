@@ -460,6 +460,28 @@ export async function listAllScans(projectId: string): Promise<ScanJobRow[]> {
   `;
 }
 
+/** List pending_review with stars for auto-approve sorting. */
+export async function listPendingReviewWithStars(): Promise<
+  Array<{
+    id: string;
+    project_id: string;
+    full_name: string;
+    stars: number | null;
+    created_at: Date;
+  }>
+> {
+  const db = getDb();
+  return db`
+    SELECT
+      j.id::text, j.project_id::text, j.created_at,
+      p.full_name, p.stars
+    FROM scan_jobs j
+    JOIN projects p ON p.id = j.project_id
+    WHERE j.state = 'pending_review'
+    ORDER BY j.created_at ASC
+  `;
+}
+
 /** List all pending_review jobs (admin queue). */
 export async function listPendingReview(): Promise<
   Array<{
@@ -482,6 +504,7 @@ export async function listPendingReview(): Promise<
     submitter_login: string | null;
     submitter_email: string | null;
     submitter_avatar: string | null;
+    stars: number | null;
   }>
 > {
   const db = getDb();
@@ -492,7 +515,7 @@ export async function listPendingReview(): Promise<
       COALESCE(j.findings_so_far, 0) AS findings_so_far,
       COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
       j.created_at, j.started_at, j.finished_at,
-      p.full_name, p.html_url, p.submitted_by,
+      p.full_name, p.html_url, p.submitted_by, p.stars,
       i.login AS submitter_login,
       i.email AS submitter_email,
       i.avatar_url AS submitter_avatar

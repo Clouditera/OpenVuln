@@ -14,6 +14,8 @@ import { authStorage } from "../auth/index.js";
 import { findingsStorage } from "../findings/index.js";
 import { parseReportYaml } from "../report/yaml-render.js";
 import { type ScanJobRow, scanStorage } from "../scans/index.js";
+import { getScanConfig } from "../scans/config-storage.js";
+import { writeAudit } from "../admin/audit.js";
 import { fetchDefaultBranchHeadSha, fetchRepoMeta, parseGitHubUrl } from "./github-sync.js";
 import * as storage from "./storage.js";
 import type { ProjectRow } from "./storage.js";
@@ -222,6 +224,7 @@ export async function submitProject(
 
     // New version scan
     await scanStorage.createScanJob(existing.id, commitSha, resolvedRef);
+    await maybeAutoApprove();
     const counts = await findingsStorage.severityCounts(existing.id);
     return { project: await toCard(existing, counts) };
   }
@@ -268,6 +271,7 @@ export async function submitProject(
   }
 
   await scanStorage.createScanJob(project.id, commitSha, resolvedRef);
+  await maybeAutoApprove();
   return { project: await toCard(project, emptyCounts()) };
 }
 
@@ -308,4 +312,43 @@ export async function cancelScanJob(
     await scanStorage.enqueueVhTeardown(vhTaskId);
   }
   return { ok: true, deleted: projectDeleted ? "project" : "job" };
+}
+
+/**
+ * Auto-approve: if enabled in scan_config, approve all pending_review jobs
+ * on each submit trigger, ordered by strategy (stars_desc | fifo).
+ * No limit (fish No.1803). Audit logs each approval.
+ */
+async function maybeAutoApprove(): Promise<void> {
+  let cfg;
+  try {
+    cfg = await getScanConfig();
+  } catch {
+    return; // table missing on fresh boot
+  }
+  if (!cfg.auto_approve_enabled) return;
+
+  const pending = await scanStorage.listPendingReviewWithStars();
+  if (pending.length === 0) return;
+
+  const strategy = cfg.auto_approve_strategy ?? "fifo";
+  const sorted = [...pending].sort((a, b) => {
+    if (strategy === "stars_desc") {
+      const starDiff = (b.stars ?? 0) - (a.stars ?? 0);
+      if (starDiff !== 0) return starDiff;
+      return a.created_at.getTime() - b.created_at.getTime();
+    }
+    return a.created_at.getTime() - b.created_at.getTime();
+  });
+
+  for (const job of sorted) {
+    const approved = await scanStorage.approveScanJob(job.id);
+    if (approved) {
+      await writeAudit("auto_approve", "scan_job", job.id, {
+        strategy,
+        project: job.full_name,
+        stars: job.stars ?? 0,
+      }).catch(() => {});
+    }
+  }
 }

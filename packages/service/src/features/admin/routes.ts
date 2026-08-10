@@ -325,7 +325,7 @@ adminRouter.put("/scan-config", async (c) => {
     "scan_timeout_hours", "max_items_per_recon", "agent_max_parallel",
     "audit_focus", "output_language", "vuln_focus",
     "enable_dynamic_verify", "enable_dynamic_exploit",
-    "scan_concurrency",
+    "scan_concurrency", "auto_approve_enabled", "auto_approve_strategy",
   ];
   for (const k of allowed) {
     if (k in body) updates[k] = body[k];
@@ -343,6 +343,13 @@ adminRouter.put("/scan-config", async (c) => {
         field: "output_language",
         reason: "must_be_en_or_zh-CN",
         message: "output_language must be en or zh-CN",
+      });
+    }
+    if (msg.startsWith("invalid_auto_approve_strategy:")) {
+      throw new AppError("ERR_VALIDATION", {
+        field: "auto_approve_strategy",
+        reason: "must_be_stars_desc_or_fifo",
+        message: "auto_approve_strategy must be stars_desc or fifo",
       });
     }
     throw e;
