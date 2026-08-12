@@ -103,10 +103,28 @@
   }
 }
 
+@keyframes live-scan-sweep {
+  from {
+    transform: translateX(-105%);
+  }
+  to {
+    transform: translateX(305%);
+  }
+}
+
+.live-scan-sweep {
+  animation: live-scan-sweep 2.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .openvuln-brand,
   .openvuln-composer {
     animation: none;
+  }
+
+  .live-scan-sweep {
+    animation: none;
+    transform: translateX(200%);
   }
 }
 

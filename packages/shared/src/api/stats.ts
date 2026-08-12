@@ -32,6 +32,8 @@ export interface RecentActivityItem {
 
 export interface OverviewStats {
   project_count: number;
+  /** Distinct active repositories with at least one completed scan. */
+  scanned_project_count?: number;
   scan_completed_count: number;
   scan_failed_count: number;
   scan_in_progress_count: number;

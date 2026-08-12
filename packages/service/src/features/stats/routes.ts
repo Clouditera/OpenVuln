@@ -51,11 +51,17 @@ function buildTrend(realByDate: Map<string, TrendDay>): TrendDay[] {
 statsRouter.get("/overview", async (c) => {
   const db = getDb();
   const projectCount = await projectStorage.countActive();
-  const scanRows = await db<{ completed: string; failed: string; in_progress: string }[]>`
+  const scanRows = await db<{
+    completed: string;
+    failed: string;
+    in_progress: string;
+    scanned_projects: string;
+  }[]>`
     SELECT
       count(*) FILTER (WHERE j.state = 'completed')::text AS completed,
       count(*) FILTER (WHERE j.state = 'failed')::text AS failed,
-      count(*) FILTER (WHERE j.state IN ('queued', 'dispatching', 'scanning'))::text AS in_progress
+      count(*) FILTER (WHERE j.state IN ('queued', 'dispatching', 'scanning'))::text AS in_progress,
+      count(DISTINCT j.project_id) FILTER (WHERE j.state = 'completed')::text AS scanned_projects
     FROM scan_jobs j
     JOIN projects p ON p.id = j.project_id AND p.removed_at IS NULL
   `;
@@ -204,6 +210,7 @@ statsRouter.get("/overview", async (c) => {
 
   const body: OverviewStats = {
     project_count: projectCount,
+    scanned_project_count: Number(scanRows[0]?.scanned_projects ?? 0),
     scan_completed_count: Number(scanRows[0]?.completed ?? 0),
     scan_failed_count: Number(scanRows[0]?.failed ?? 0),
     scan_in_progress_count: Number(scanRows[0]?.in_progress ?? 0),

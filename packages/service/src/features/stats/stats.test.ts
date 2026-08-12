@@ -39,6 +39,7 @@ describe("stats overview", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       project_count: number;
+      scanned_project_count: number;
       finding_total: number;
       finding_disclosed_count: number;
       severity_counts: { high: number; medium: number };
@@ -46,6 +47,7 @@ describe("stats overview", () => {
       cwe_count?: number;
     };
     expect(body.project_count).toBe(1);
+    expect(body.scanned_project_count).toBe(1);
     expect(body.finding_total).toBe(2); // info excluded
     expect(body.finding_disclosed_count).toBe(1);
     expect(body.severity_counts.high).toBe(1);
