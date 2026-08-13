@@ -64,6 +64,26 @@ authRouter.get("/github/callback", async (c) => {
     return renderOAuthError(c, "invalid_state", "Login session expired or invalid. Please try signing in again.");
   }
 
+  // ── Domain relay (fish No.1890) ──────────────────────────────────────────
+  // GitHub App has ONE registered callback domain, but the session cookie is
+  // host-only: exchange must complete on the domain whose front-end will use
+  // it. Exchange-origin front-ends (reverse-proxy /api/*) exchange on their
+  // own domain; everyone else (HF, main site) exchanges on canonicalOrigin.
+  const relay = c.req.query("relay") === "1";
+  const targetOrigin = exchangeOriginFor(verified.returnTo, cfg);
+  if (!relay) {
+    const current = requestOrigin(c);
+    if (current !== targetOrigin) {
+      const url = new URL(`${targetOrigin}/api/auth/github/callback`);
+      url.searchParams.set("code", code);
+      url.searchParams.set("state", state);
+      url.searchParams.set("relay", "1");
+      logger.info({ from: current, to: targetOrigin }, "OAuth callback relay");
+      return c.redirect(url.toString());
+    }
+  }
+  // relay=1 → exchange unconditionally (loop guard; proxies may rewrite Host).
+
   try {
     const token = await exchangeCodeForToken(code, cfg);
     const ghUser = await fetchGithubUser(token);
@@ -133,6 +153,36 @@ authRouter.get("/me", async (c) => {
 });
 
 export { COOKIE as SESSION_COOKIE_NAME, SESSION_TTL_DAYS };
+
+/** Origin of the incoming request (best-effort behind reverse proxies). */
+function requestOrigin(c: import("hono").Context): string {
+  const proto =
+    c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() || "https";
+  const host =
+    c.req.header("x-forwarded-host")?.split(",")[0]?.trim() ||
+    c.req.header("host") ||
+    "";
+  return `${proto}://${host}`;
+}
+
+/**
+ * Where the OAuth code exchange must complete for a given return_to.
+ * Relative paths → canonical; absolute origins in exchangeOrigins → that origin;
+ * any other whitelisted origin (HF etc.) → canonical.
+ */
+function exchangeOriginFor(returnTo: string, cfg: ServiceConfig): string {
+  if (returnTo.startsWith("/") && !returnTo.startsWith("//")) {
+    return cfg.githubOAuth.canonicalOrigin;
+  }
+  try {
+    const u = new URL(returnTo);
+    const origin = `${u.protocol}//${u.host}`;
+    if (cfg.githubOAuth.exchangeOrigins.includes(origin)) return origin;
+  } catch {
+    // fall through
+  }
+  return cfg.githubOAuth.canonicalOrigin;
+}
 
 /** Render a human-readable OAuth error page (for popup/redirect context). */
 function renderOAuthError(c: import("hono").Context, code: string, message: string) {

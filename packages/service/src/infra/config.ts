@@ -45,6 +45,10 @@ export interface ServiceConfig {
     callbackUrl: string;
     /** HMAC secret for OAuth state (defaults to client secret). */
     stateSecret: string;
+    /** Domain where code exchange happens for non-exchange-origin front-ends. */
+    canonicalOrigin: string;
+    /** Front-end origins that reverse-proxy /api/* — exchange on their domain. */
+    exchangeOrigins: string[];
   };
   submitDailyLimit: number;
   scan: {
@@ -91,6 +95,15 @@ export function loadConfig(): ServiceConfig {
     `${publicBaseUrl.replace(/\/$/, "")}/api/auth/github/callback`;
   const corsRaw = optionalEnv("CORS_ALLOWED_ORIGINS", "");
   const corsAllowedOrigins = corsRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // OAuth exchange domains: front-ends that reverse-proxy /api/* through their
+  // own domain must complete code exchange on THAT domain (cookie host-only).
+  // Everyone else (HF cross-origin, main site) exchanges on the canonical origin.
+  const oauthCanonicalOrigin =
+    optionalEnv("OAUTH_CANONICAL_ORIGIN", "") || publicBaseUrl.replace(/\/$/, "");
+  const oauthExchangeOrigins = optionalEnv("OAUTH_EXCHANGE_ORIGINS", "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -152,6 +165,8 @@ export function loadConfig(): ServiceConfig {
       clientSecret: oauthClientSecret,
       callbackUrl: oauthCallback,
       stateSecret: optionalEnv("GITHUB_OAUTH_STATE_SECRET", "") || oauthClientSecret || "dev-oauth-state",
+      canonicalOrigin: oauthCanonicalOrigin,
+      exchangeOrigins: oauthExchangeOrigins,
     },
     submitDailyLimit: Number(optionalEnv("SUBMIT_DAILY_LIMIT", "10")),
     scan: {

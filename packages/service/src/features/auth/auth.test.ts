@@ -11,6 +11,21 @@ import * as gh from "./github-oauth.js";
 import { requireRepoAccess } from "./permission.js";
 import * as storage from "./storage.js";
 
+// Mock GitHub network calls only; keep real sign/verify for state.
+vi.mock("./github-oauth.js", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("./github-oauth.js")>();
+  return {
+    ...orig,
+    exchangeCodeForToken: vi.fn().mockResolvedValue("gho_test_token"),
+    fetchGithubUser: vi.fn().mockResolvedValue({
+      id: 4242,
+      login: "relay-user",
+      avatar_url: "https://avatars.example/relay",
+    }),
+    fetchGithubPrimaryEmail: vi.fn().mockResolvedValue("relay@example.com"),
+  };
+});
+
 describe("auth oauth state", () => {
   const secret = "test-state-secret";
 
@@ -64,6 +79,97 @@ describe("auth oauth state", () => {
     ).toString("base64url");
     const sig = createHmac("sha256", secret).update(payload).digest("base64url");
     expect(gh.verifyOAuthState(`${payload}.${sig}`, secret)).toBeNull();
+  });
+});
+
+describe("oauth callback domain relay", () => {
+  let ctx: TestContext;
+  const CANONICAL = "https://openvuln.example";
+  const CHATGLM = "https://security.chatglm.site";
+  const HF = "https://zai-org-openvuln.static.hf.space";
+
+  beforeAll(async () => {
+    ctx = await setupTestApp();
+    ctx.config.githubOAuth.canonicalOrigin = CANONICAL;
+    ctx.config.githubOAuth.exchangeOrigins = [CHATGLM];
+    ctx.config.corsAllowedOrigins = [CHATGLM, HF];
+  });
+
+  beforeEach(async () => {
+    await cleanTables();
+    vi.mocked(gh.exchangeCodeForToken).mockClear();
+  });
+
+  function signState(returnTo: string): string {
+    return gh.signOAuthState(returnTo, ctx.config.githubOAuth.stateSecret);
+  }
+
+  function callbackUrl(params: Record<string, string>): string {
+    const q = new URLSearchParams(params);
+    return `/api/auth/github/callback?${q.toString()}`;
+  }
+
+  it("chatglm origin + HF return_to → 302 relay to canonical with relay=1 (no exchange)", async () => {
+    const state = signState(`${HF}/`);
+    const res = await ctx.app.request(
+      callbackUrl({ code: "c1", state }),
+      { headers: { host: "security.chatglm.site", "x-forwarded-proto": "https" } },
+    );
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    expect(loc.startsWith(`${CANONICAL}/api/auth/github/callback?`)).toBe(true);
+    const u = new URL(loc);
+    expect(u.searchParams.get("relay")).toBe("1");
+    expect(u.searchParams.get("code")).toBe("c1");
+    expect(u.searchParams.get("state")).toBe(state);
+    expect(vi.mocked(gh.exchangeCodeForToken)).not.toHaveBeenCalled();
+  });
+
+  it("chatglm origin + relative return_to → 302 relay to canonical", async () => {
+    const state = signState("/my");
+    const res = await ctx.app.request(
+      callbackUrl({ code: "c2", state }),
+      { headers: { host: "security.chatglm.site", "x-forwarded-proto": "https" } },
+    );
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    expect(loc.startsWith(`${CANONICAL}/api/auth/github/callback?`)).toBe(true);
+    expect(new URL(loc).searchParams.get("relay")).toBe("1");
+    expect(vi.mocked(gh.exchangeCodeForToken)).not.toHaveBeenCalled();
+  });
+
+  it("chatglm origin + chatglm return_to → exchange in place, cookie set, redirect to return_to", async () => {
+    const state = signState(`${CHATGLM}/app`);
+    const res = await ctx.app.request(
+      callbackUrl({ code: "c3", state }),
+      { headers: { host: "security.chatglm.site", "x-forwarded-proto": "https" } },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${CHATGLM}/app`);
+    expect(res.headers.get("set-cookie") ?? "").toContain("ov_session=");
+    expect(vi.mocked(gh.exchangeCodeForToken)).toHaveBeenCalledTimes(1);
+  });
+
+  it("relay=1 forces exchange regardless of origin (loop guard)", async () => {
+    const state = signState(`${HF}/done`);
+    const res = await ctx.app.request(
+      callbackUrl({ code: "c4", state, relay: "1" }),
+      { headers: { host: "security.chatglm.site", "x-forwarded-proto": "https" } },
+    );
+    expect(res.status).toBe(302);
+    // Final redirect goes to return_to, NOT another callback hop
+    expect(res.headers.get("location")).toBe(`${HF}/done`);
+    expect(vi.mocked(gh.exchangeCodeForToken)).toHaveBeenCalledTimes(1);
+  });
+
+  it("non-whitelisted return_to still rejected (no relay, no exchange)", async () => {
+    const state = signState("https://evil.example/phish");
+    const res = await ctx.app.request(
+      callbackUrl({ code: "c5", state }),
+      { headers: { host: "security.chatglm.site", "x-forwarded-proto": "https" } },
+    );
+    expect(res.status).toBe(502);
+    expect(vi.mocked(gh.exchangeCodeForToken)).not.toHaveBeenCalled();
   });
 });
 
