@@ -1,0 +1,46 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+packages/*/dist/
+packages/service/public/
+.turbo/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+!deploy/.env.example
+!deploy/.env.prod.example
+*.pem
+*.key
+id_rsa*
+
+# logs & local data
+*.log
+.data/
+coverage/
+.DS_Store
+tmp/
+/tmp/
+
+# editor / OS
+.idea/
+.vscode/
+*.swp
+
+# bossmode / internal workspace artifacts (never publish)
+.bossmode-attachments/
+.bossmode/
+*.bossmode*
+
+.env.vh
+
+# HF
+.cache/
+*.sqlite
+
+# internal QA docs & evidence — never publish (local: ~/.openvuln/qa-archive/docs-qa/)
+docs/qa/

@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/test/**/*",
+    "src/features/auth/service.ts",
+    "src/features/auth/session.ts",
+    "src/features/auth/storage.ts",
+    "src/features/auth/github.ts"
+  ],
+  "references": [{ "path": "../shared" }]
+}

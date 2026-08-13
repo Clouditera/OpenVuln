@@ -1,0 +1,26 @@
+{
+  "name": "openvuln",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "test": "turbo run test",
+    "seed:demo": "echo 'seed:demo archived — real VH mode. Use ALLOW_SEED_DEMO=1 only for local mock.' && exit 2",
+    "seed:demo:reset": "echo 'seed:demo:reset archived — real VH mode. Use ALLOW_SEED_DEMO=1 only for local mock.' && exit 2",
+    "vh:smoke": "node scripts/vh-smoke.mjs",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.15.4"
+}

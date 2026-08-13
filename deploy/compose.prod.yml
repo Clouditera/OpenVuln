@@ -1,0 +1,72 @@
+# OpenVuln production stack (split): web + api + postgres
+# No MinIO (app does not use it).
+#
+# On VulnAgent:
+#   cd ~/openvuln-split
+#   cp .env.prod.example .env.prod   # fill secrets
+#   docker compose -f compose.prod.yml --env-file .env.prod up -d
+#
+# Host nginx should proxy_pass https://openvuln.clouditera.com → 127.0.0.1:23100
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-openvuln}-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openvuln}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-openvuln}
+    volumes:
+      - ov_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - openvuln
+
+  api:
+    image: ${OPENVULN_API_IMAGE:-openvuln:api}
+    container_name: ${COMPOSE_PROJECT_NAME:-openvuln}-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ${ENV_FILE:-.env.prod}
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "7860"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openvuln}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-openvuln}
+      # Reach VH on the host (VulnAgent)
+      VULNHUNTER_BASE_URL: ${VULNHUNTER_BASE_URL:-http://host.docker.internal:28080}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      # GitHub OAuth: pin IP to bypass GFW DNS pollution on China mainland servers.
+      # If github.com becomes unreachable, find a working IP:
+      #   dig +short github.com | head -1   (or check https://www.ipaddress.com/site/github.com)
+      #   curl -sS -o /dev/null -w '%{http_code}' --resolve github.com:443:<IP> https://github.com
+      - "github.com:140.82.116.4"
+    networks:
+      - openvuln
+    # internal only — web proxies /api
+
+  web:
+    image: ${OPENVULN_WEB_IMAGE:-openvuln:web}
+    container_name: ${COMPOSE_PROJECT_NAME:-openvuln}-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_BIND:-127.0.0.1:23100}:80"
+    networks:
+      - openvuln
+
+volumes:
+  ov_pg_data:
+
+networks:
+  openvuln:
+    driver: bridge

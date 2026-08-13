@@ -1,0 +1,35 @@
+{
+  "name": "@openvuln/service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc && mkdir -p dist/infra/db && cp -r src/infra/db/migrations dist/infra/db/",
+    "dev": "tsc --watch --preserveWatchOutput & node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "seed:demo": "node ./scripts/seed-demo.mjs",
+    "seed:demo:reset": "node ./scripts/seed-demo.mjs --reset",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@openvuln/shared": "workspace:*",
+    "hono": "^4.7.4",
+    "js-yaml": "^5.2.3",
+    "jszip": "^3.10.1",
+    "nodemailer": "^9.0.3",
+    "pino": "^9.6.0",
+    "postgres": "^3.4.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^8.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
+  }
+}
