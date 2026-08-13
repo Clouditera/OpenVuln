@@ -162,6 +162,18 @@ describe("oauth callback domain relay", () => {
     expect(vi.mocked(gh.exchangeCodeForToken)).toHaveBeenCalledTimes(1);
   });
 
+  it("proxy chain with proto=http on canonical host still exchanges in place (host-based compare)", async () => {
+    const state = signState(`${HF}/`);
+    const res = await ctx.app.request(
+      callbackUrl({ code: "c6", state }),
+      // prod: outer TLS nginx → web container (plain HTTP) rewrites proto to http
+      { headers: { host: "openvuln.example", "x-forwarded-proto": "http" } },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${HF}/`);
+    expect(vi.mocked(gh.exchangeCodeForToken)).toHaveBeenCalledTimes(1);
+  });
+
   it("non-whitelisted return_to still rejected (no relay, no exchange)", async () => {
     const state = signState("https://evil.example/phish");
     const res = await ctx.app.request(

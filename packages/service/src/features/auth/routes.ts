@@ -72,8 +72,16 @@ authRouter.get("/github/callback", async (c) => {
   const relay = c.req.query("relay") === "1";
   const targetOrigin = exchangeOriginFor(verified.returnTo, cfg);
   if (!relay) {
+    // Compare by host: proxy chains may rewrite/lose the original proto
+    // (web container serves plain HTTP behind TLS-terminating nginx).
     const current = requestOrigin(c);
-    if (current !== targetOrigin) {
+    let targetHost = "";
+    try {
+      targetHost = new URL(targetOrigin).host;
+    } catch {
+      targetHost = targetOrigin;
+    }
+    if (requestHost(c) !== targetHost) {
       const url = new URL(`${targetOrigin}/api/auth/github/callback`);
       url.searchParams.set("code", code);
       url.searchParams.set("state", state);
@@ -154,15 +162,20 @@ authRouter.get("/me", async (c) => {
 
 export { COOKIE as SESSION_COOKIE_NAME, SESSION_TTL_DAYS };
 
-/** Origin of the incoming request (best-effort behind reverse proxies). */
+/** Host of the incoming request (best-effort behind reverse proxies). */
+function requestHost(c: import("hono").Context): string {
+  return (
+    c.req.header("x-forwarded-host")?.split(",")[0]?.trim() ||
+    c.req.header("host") ||
+    ""
+  );
+}
+
+/** Origin of the incoming request (logging only). */
 function requestOrigin(c: import("hono").Context): string {
   const proto =
     c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() || "https";
-  const host =
-    c.req.header("x-forwarded-host")?.split(",")[0]?.trim() ||
-    c.req.header("host") ||
-    "";
-  return `${proto}://${host}`;
+  return `${proto}://${requestHost(c)}`;
 }
 
 /**
