@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   setupTestApp,
   cleanTables,
@@ -277,5 +277,127 @@ describe("auto-approve", () => {
     const cfg = await getScanConfig();
     expect(cfg.auto_approve_enabled).toBe(true);
     expect(cfg.auto_approve_strategy).toBe("stars_desc");
+  });
+});
+
+describe("admin direct submissions", () => {
+  let ctx: TestContext;
+  const ADMIN = { authorization: "Bearer test-admin-token" };
+  const SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  beforeAll(async () => {
+    ctx = await setupTestApp();
+  });
+
+  beforeEach(async () => {
+    await cleanTables();
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubGithub(opts?: { refOk?: boolean }) {
+    const refOk = opts?.refOk ?? true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/commits/")) {
+          if (!refOk) {
+            return new Response(JSON.stringify({ message: "No commit found" }), {
+              status: 422,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return new Response(JSON.stringify({ sha: SHA }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        // repo meta
+        return new Response(
+          JSON.stringify({
+            id: 990001,
+            name: "demo-repo",
+            full_name: "acme/demo-repo",
+            private: false,
+            html_url: "https://github.com/acme/demo-repo",
+            description: "demo",
+            language: "TypeScript",
+            stargazers_count: 42,
+            default_branch: "main",
+            owner: { login: "acme" },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+  }
+
+  it("creates project + queued job, skips review", async () => {
+    stubGithub();
+    const res = await ctx.app.request("/api/admin/submissions", {
+      method: "POST",
+      headers: { ...ADMIN, "content-type": "application/json" },
+      body: JSON.stringify({ repo_url: "https://github.com/acme/demo-repo" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { job_id: string; state: string; project_id: string };
+    expect(body.state).toBe("queued");
+    const job = await scanStorage.getScanJob(body.job_id);
+    expect(job?.state).toBe("queued");
+    expect(job?.commit_sha).toBe(SHA);
+  });
+
+  it("unknown ref → 422 ref_not_found", async () => {
+    stubGithub({ refOk: false });
+    const res = await ctx.app.request("/api/admin/submissions", {
+      method: "POST",
+      headers: { ...ADMIN, "content-type": "application/json" },
+      body: JSON.stringify({ repo_url: "acme/demo-repo", git_ref: "no-such-branch" }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error?: { reason?: string } };
+    expect(body.error?.reason ?? JSON.stringify(body)).toContain("ref_not_found");
+  });
+
+  it("in-flight job → 409 scan_in_progress", async () => {
+    stubGithub();
+    const first = await ctx.app.request("/api/admin/submissions", {
+      method: "POST",
+      headers: { ...ADMIN, "content-type": "application/json" },
+      body: JSON.stringify({ repo_url: "acme/demo-repo" }),
+    });
+    expect(first.status).toBe(201);
+    const second = await ctx.app.request("/api/admin/submissions", {
+      method: "POST",
+      headers: { ...ADMIN, "content-type": "application/json" },
+      body: JSON.stringify({ repo_url: "acme/demo-repo" }),
+    });
+    expect(second.status).toBe(409);
+  });
+
+  it("same SHA completed → idempotent deduped response", async () => {
+    stubGithub();
+    const first = await ctx.app.request("/api/admin/submissions", {
+      method: "POST",
+      headers: { ...ADMIN, "content-type": "application/json" },
+      body: JSON.stringify({ repo_url: "acme/demo-repo" }),
+    });
+    const b1 = (await first.json()) as { job_id: string };
+    // Force job to completed
+    const db = (await import("../../infra/db/index.js")).getDb();
+    await db`UPDATE scan_jobs SET state = 'completed', finished_at = now() WHERE id = ${b1.job_id}::uuid`;
+    const second = await ctx.app.request("/api/admin/submissions", {
+      method: "POST",
+      headers: { ...ADMIN, "content-type": "application/json" },
+      body: JSON.stringify({ repo_url: "acme/demo-repo" }),
+    });
+    expect(second.status).toBe(200);
+    const b2 = (await second.json()) as { deduped?: boolean; job_id: string };
+    expect(b2.deduped).toBe(true);
+    expect(b2.job_id).toBe(b1.job_id);
   });
 });

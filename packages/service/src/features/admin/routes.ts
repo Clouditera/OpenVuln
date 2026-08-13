@@ -192,6 +192,129 @@ adminRouter.get("/pending-reviews", async (c) => {
 });
 
 /**
+ * POST /api/admin/submissions — direct scan creation (fish No.1922).
+ * Skips owner verification + pending_review: project upsert → job queued.
+ * Body: { repo_url: string, git_ref?: string }
+ */
+adminRouter.post("/submissions", async (c) => {
+  let body: { repo_url?: unknown; git_ref?: unknown };
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    throw new AppError("ERR_VALIDATION", { reason: "invalid_json" });
+  }
+  const repoUrl = typeof body?.repo_url === "string" ? body.repo_url.trim() : "";
+  const gitRef = typeof body?.git_ref === "string" && body.git_ref.trim() ? body.git_ref.trim() : undefined;
+  if (!repoUrl) throw new AppError("ERR_VALIDATION", { field: "repo_url" });
+
+  const { parseGitHubUrl, fetchRepoMeta, fetchDefaultBranchHeadSha } = await import(
+    "../projects/github-sync.js"
+  );
+  const parsed = parseGitHubUrl(repoUrl);
+  if (!parsed) {
+    throw new AppError("ERR_VALIDATION", {
+      field: "repo_url",
+      reason: "invalid_github_url",
+      message: "Provide a valid GitHub URL or owner/repo",
+    });
+  }
+  const config = c.get("config");
+  const meta = await fetchRepoMeta(parsed.owner, parsed.repo, config.github.serverToken);
+  if (meta.private) {
+    throw new AppError("ERR_VALIDATION", {
+      field: "repo_url",
+      reason: "private_repo",
+      message: "Only public repositories are accepted",
+    });
+  }
+  const resolvedRef = gitRef || meta.default_branch;
+  const commitSha = await fetchDefaultBranchHeadSha(
+    meta.owner.login,
+    meta.name,
+    resolvedRef,
+    config.github.serverToken,
+  );
+  if (!commitSha) {
+    throw new AppError("ERR_VALIDATION", {
+      field: "git_ref",
+      reason: "ref_not_found",
+      message: `Branch/tag/commit "${resolvedRef}" not found`,
+    });
+  }
+
+  let project = await projectStorage.findByRepoId(meta.id);
+  if (project) {
+    // Idempotent: same SHA completed → return existing
+    const completed = await scanStorage.findCompletedBySha(project.id, commitSha);
+    if (completed) {
+      return c.json({
+        project_id: project.id,
+        full_name: project.full_name,
+        job_id: completed.id,
+        state: "completed",
+        deduped: true,
+      });
+    }
+    const inFlight = await scanStorage.findInFlight(project.id);
+    if (inFlight) {
+      throw new AppError("ERR_CONFLICT", {
+        reason: "scan_in_progress",
+        job_id: inFlight.id,
+        state: inFlight.state,
+        message: `A scan is already in progress for this project (${inFlight.state}).`,
+      });
+    }
+  } else {
+    try {
+      project = await projectStorage.insertProject({
+        githubRepoId: meta.id,
+        ownerLogin: meta.owner.login,
+        name: meta.name,
+        fullName: meta.full_name,
+        htmlUrl: meta.html_url,
+        description: meta.description,
+        language: meta.language,
+        stars: meta.stargazers_count ?? 0,
+        defaultBranch: meta.default_branch,
+        submittedBy: null, // admin system submission
+      });
+    } catch (err) {
+      if (!projectStorage.isUniqueViolation(err)) throw err;
+      project = await projectStorage.findByRepoId(meta.id);
+      if (!project) throw err;
+      const inFlight = await scanStorage.findInFlight(project.id);
+      if (inFlight) {
+        throw new AppError("ERR_CONFLICT", {
+          reason: "scan_in_progress",
+          job_id: inFlight.id,
+          state: inFlight.state,
+        });
+      }
+    }
+  }
+
+  const job = await scanStorage.createScanJob(project.id, commitSha, resolvedRef);
+  const queued = await scanStorage.approveScanJob(job.id); // pending_review → queued
+  logger.info(
+    { jobId: job.id, project: project.full_name, ref: resolvedRef, sha: commitSha.slice(0, 8) },
+    "Admin direct submission queued",
+  );
+  await writeAudit("admin_submit", "scan_job", job.id, {
+    project: project.full_name,
+    git_ref: resolvedRef,
+    commit_sha: commitSha,
+  });
+  return c.json({
+    project_id: project.id,
+    full_name: project.full_name,
+    job_id: job.id,
+    state: queued?.state ?? "queued",
+    commit_sha: commitSha,
+    git_ref: resolvedRef,
+  }, 201);
+});
+
+/**
  * POST /api/admin/scan-jobs/:id/approve — pending_review → queued.
  */
 adminRouter.post("/scan-jobs/:jobId/approve", async (c) => {
