@@ -1,4 +1,5 @@
 import type {
+  CweTopItem,
   LiveScanItem,
   OverviewStats,
   RecentActivityItem,
@@ -11,6 +12,23 @@ import { findingsStorage } from "../findings/index.js";
 import { projectStorage } from "../projects/index.js";
 
 export const statsRouter = new Hono();
+
+const CWE_NAMES: Record<string, string> = {
+  "CWE-79": "XSS",
+  "CWE-89": "SQL Injection",
+  "CWE-22": "Path Traversal",
+  "CWE-78": "OS Command Injection",
+  "CWE-352": "CSRF",
+  "CWE-918": "SSRF",
+  "CWE-287": "Auth Bypass",
+  "CWE-502": "Deserialization",
+  "CWE-611": "XXE",
+  "CWE-94": "Code Injection",
+  "CWE-200": "Info Exposure",
+  "CWE-601": "Open Redirect",
+  "CWE-798": "Hard-coded Credentials",
+  "CWE-862": "Missing Authorization",
+};
 
 function emptyTrendDay(date: string): TrendDay {
   return { date, critical: 0, high: 0, medium: 0, low: 0 };
@@ -43,6 +61,23 @@ statsRouter.get("/overview", async (c) => {
   `;
   const findingTotals = await findingsStorage.platformFindingTotals();
   const severity_counts = await findingsStorage.platformSeverityCounts();
+
+  const cweRows = await db<{ cwe: string; n: string }[]>`
+    SELECT COALESCE(f.cwe, 'unknown') AS cwe, count(*)::text AS n
+    FROM findings f
+    JOIN projects p ON p.id = f.project_id
+      AND p.removed_at IS NULL
+      AND p.current_scan_job_id = f.scan_job_id
+    WHERE f.severity IN ('critical', 'high', 'medium', 'low')
+    GROUP BY COALESCE(f.cwe, 'unknown')
+    ORDER BY count(*) DESC
+    LIMIT 8
+  `;
+  const cwe_top: CweTopItem[] = cweRows.map((r) => ({
+    cwe: r.cwe,
+    name: CWE_NAMES[r.cwe] ?? null,
+    count: Number(r.n),
+  }));
 
   const liveRows = await db<
     {
@@ -176,6 +211,7 @@ statsRouter.get("/overview", async (c) => {
     finding_disclosed_count: findingTotals.disclosed,
     severity_counts: severity_counts ?? emptySeverityCounts(),
     trend: buildTrend(realByDate),
+    cwe_top,
     live: {
       scanning,
       queued_count: Number(queuedRows[0]?.n ?? 0),

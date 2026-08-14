@@ -8,6 +8,12 @@ export interface TrendDay {
   low: number;
 }
 
+export interface CweTopItem {
+  cwe: string;
+  name: string | null;
+  count: number;
+}
+
 export interface LiveScanItem {
   project_id: string;
   full_name: string;
@@ -35,6 +41,7 @@ export interface OverviewStats {
   severity_counts: SeverityCounts;
   /** Optional extended fields (pulse / live). */
   trend?: TrendDay[];
+  cwe_top?: CweTopItem[];
   live?: {
     scanning: LiveScanItem[];
     queued_count: number;
