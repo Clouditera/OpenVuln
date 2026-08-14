@@ -78,8 +78,6 @@ export function PlatformPulse({ stats }: { stats: OverviewStats | undefined }) {
   const live = stats?.live;
   const scanningCount = live?.scanning.length ?? 0;
   const queuedCount = live?.queued_count ?? 0;
-  const cweTop = stats?.cwe_top ?? [];
-  const cweMax = Math.max(1, ...cweTop.map((c) => c.count));
   const hasFindings =
     (stats?.finding_total ?? 0) > 0 || trend.some((d) =>  (d.critical??0)+d.high+d.medium+d.low  > 0);
 
@@ -233,44 +231,6 @@ export function PlatformPulse({ stats }: { stats: OverviewStats | undefined }) {
           </ul>
         </div>
 
-        {/* TOP CWE */}
-        <div className={`${PANEL} lg:col-span-12`}>
-          <p className={EYEBROW}>Top CWE</p>
-          {cweTop.length === 0 ? (
-            <p className="mt-3 text-sm text-ink-tertiary">No CWE data yet.</p>
-          ) : (
-            <ul className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
-              {cweTop.map((c) => (
-                <li key={c.cwe} className="flex items-center gap-2 text-sm">
-                  <a
-                    href={
-                      c.cwe.startsWith("CWE-")
-                        ? `https://cwe.mitre.org/data/definitions/${c.cwe.replace("CWE-", "")}.html`
-                        : undefined
-                    }
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-[4.5rem] shrink-0 font-mono text-[12px] text-accent-600 hover:underline"
-                  >
-                    {c.cwe}
-                  </a>
-                  <span className="w-16 shrink-0 truncate text-[12px] text-ink-secondary">
-                    {c.name ?? "—"}
-                  </span>
-                  <div className="h-1 flex-1 overflow-hidden rounded-full bg-surface-sunken">
-                    <div
-                      className="h-full rounded-full bg-accent-600"
-                      style={{ width: `${(c.count / cweMax) * 100}%` }}
-                    />
-                  </div>
-                  <span className="w-8 text-right font-mono text-[12px] text-ink-secondary">
-                    {c.count}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       </div>
 
       <style>{`
