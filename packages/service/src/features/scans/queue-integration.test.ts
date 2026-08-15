@@ -351,6 +351,30 @@ describe("admin direct submissions", () => {
     expect(job?.commit_sha).toBe(SHA);
   });
 
+  it("pending-reviews response includes stars/description/language", async () => {
+    // Seed a pending_review job directly (listPendingReview source)
+    const { projectId } = await seedProject({ fullName: "acme/review-me", stars: 777 });
+    const db = (await import("../../infra/db/index.js")).getDb();
+    await db`UPDATE projects SET description = 'demo desc', language = 'Go' WHERE id = ${projectId}::uuid`;
+    await scanStorage.createScanJob(projectId, SHA);
+
+    const res = await ctx.app.request("/api/admin/pending-reviews", { headers: ADMIN });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{
+        full_name: string;
+        stars: number | null;
+        description: string | null;
+        language: string | null;
+      }>;
+    };
+    const item = body.items.find((i) => i.full_name === "acme/review-me");
+    expect(item).toBeDefined();
+    expect(item?.stars).toBe(777);
+    expect(item?.description).toBe("demo desc");
+    expect(item?.language).toBe("Go");
+  });
+
   it("unknown ref → 422 ref_not_found", async () => {
     stubGithub({ refOk: false });
     const res = await ctx.app.request("/api/admin/submissions", {

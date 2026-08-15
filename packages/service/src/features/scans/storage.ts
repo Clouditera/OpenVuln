@@ -505,6 +505,8 @@ export async function listPendingReview(): Promise<
     submitter_email: string | null;
     submitter_avatar: string | null;
     stars: number | null;
+    description: string | null;
+    language: string | null;
   }>
 > {
   const db = getDb();
@@ -515,7 +517,7 @@ export async function listPendingReview(): Promise<
       COALESCE(j.findings_so_far, 0) AS findings_so_far,
       COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
       j.created_at, j.started_at, j.finished_at,
-      p.full_name, p.html_url, p.submitted_by, p.stars,
+      p.full_name, p.html_url, p.submitted_by, p.stars, p.description, p.language,
       i.login AS submitter_login,
       i.email AS submitter_email,
       i.avatar_url AS submitter_avatar

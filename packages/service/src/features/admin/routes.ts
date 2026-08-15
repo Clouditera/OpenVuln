@@ -187,6 +187,9 @@ adminRouter.get("/pending-reviews", async (c) => {
       commit_sha: j.commit_sha,
       git_ref: j.git_ref,
       created_at: j.created_at.toISOString(),
+      stars: j.stars,
+      description: j.description,
+      language: j.language,
     })),
   });
 });
