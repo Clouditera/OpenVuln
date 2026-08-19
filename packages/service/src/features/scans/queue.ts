@@ -25,8 +25,18 @@ const KNOWN_VH_ACTIVE = new Set([
 
 /**
  * VH "no audit value" failures → treat as completed empty scan (Scanned + 0 findings).
+ * Content-only: the source itself has nothing to scan (incomplete/partial source).
+ * Transient infra failures (sandbox capacity, prepare unavailable) are NOT here —
+ * they go through ordinary failed → Retry (fish No.2016, task-614cf34a).
  * Keywords + metadata flags; env VH_NO_VALUE_FAIL_PATTERNS=comma|separated|extra
  */
+
+/** prepare.reason values that mean the repo content has no scan value. */
+const PREPARE_NO_VALUE_REASONS = new Set([
+  "partial_source",
+  "incomplete_source",
+]);
+
 export function isNoScanValueFailure(
   failureReason: string | null | undefined,
   metadata?: Record<string, unknown> | null,
@@ -36,8 +46,27 @@ export function isNoScanValueFailure(
   const prep = meta.prepare;
   if (prep && typeof prep === "object" && !Array.isArray(prep)) {
     const reason = String((prep as Record<string, unknown>).reason ?? "");
-    if (reason === "partial_source" || reason === "incomplete_source") return true;
-    if ((prep as Record<string, unknown>).project_complete === false) return true;
+    // Only content-level reasons. sandbox_unavailable / capacity / ERR_PREPARE_FAILED
+    // are transient infra failures → ordinary failed (retryable), never completed+0.
+    if (PREPARE_NO_VALUE_REASONS.has(reason)) return true;
+    if (
+      reason === "" &&
+      (prep as Record<string, unknown>).project_complete === false
+    ) {
+      // No explicit reason: treat incomplete project as no-value ONLY when the
+      // failure text also looks content-related; bare project_complete=false can
+      // ride along with infra failures and must not mask them.
+      const text = (failureReason ?? "").toLowerCase();
+      const contentLike = [
+        "源码不完整",
+        "功能代码缺失",
+        "无法建立完整的代码功能语义",
+        "partial_source",
+        "incomplete source",
+        "no scannable",
+      ].some((p) => text.includes(p));
+      if (contentLike) return true;
+    }
   }
   const text = (failureReason ?? "").toLowerCase();
   if (!text) return false;

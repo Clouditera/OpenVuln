@@ -24,11 +24,21 @@ function emptyCounts(): SeverityCounts {
   return emptySeverityCounts();
 }
 
+/**
+ * Public user-facing scan state (fish No.2016 / task-614cf34a):
+ * `failed` must never surface as failed — collaborators' UIs read this field.
+ * Map failed → "scanning" (retriable infra failures look busy, not broken).
+ * Rejected/cancelled/pending_review/queued/dispatching keep their existing labels.
+ */
+export function toPublicScanState<T extends string>(state: T): T {
+  return (state === "failed" ? "scanning" : state) as T;
+}
+
 function toScanSummary(scan: ScanJobRow | null) {
   if (!scan) return null;
   return {
     id: scan.id,
-    state: scan.state,
+    state: toPublicScanState(scan.state),
     commit_sha: scan.commit_sha,
     created_at: scan.created_at.toISOString(),
     finished_at: scan.finished_at?.toISOString() ?? null,
@@ -102,7 +112,7 @@ export async function getPublicView(owner: string, repo: string): Promise<Projec
     latest_scan: latest
       ? {
           id: latest.id,
-          state: latest.state,
+          state: toPublicScanState(latest.state),
           commit_sha: latest.commit_sha,
           created_at: latest.created_at.toISOString(),
           started_at: latest.started_at?.toISOString() ?? null,

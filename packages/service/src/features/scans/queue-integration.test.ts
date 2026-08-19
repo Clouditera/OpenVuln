@@ -125,6 +125,41 @@ describe("scan queue integration", () => {
     expect(counts.critical + counts.high + counts.medium + counts.low).toBe(0);
   });
 
+  it("sandbox capacity failure → failed (retryable), NOT completed+0 (task-614cf34a)", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/sandbox-cap" });
+    const job = await scanStorage.createScanJob(projectId, "cafe1234");
+    await scanStorage.approveScanJob(job.id);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    // Exact sonic production payload shape
+    ctx.mockVh.forceFailed(scanning!.vulnhunter_task_id!, {
+      failureReason: JSON.stringify({
+        code: "ERR_PREPARE_FAILED",
+        message: "沙箱服务容量不足",
+        details: {
+          phase: "prepare",
+          reason: "sandbox_unavailable",
+          detail: "沙箱服务容量不足",
+        },
+      }),
+      metadata: {
+        prepare: { reason: "sandbox_unavailable", sandbox_type: null, project_complete: false },
+      },
+    });
+    await scanQueueInternal.pollOnce(1);
+    const failed = await scanStorage.getScanJob(job.id);
+    expect(failed?.state).toBe("failed");
+    expect(failed?.fail_reason_internal ?? "").toMatch(/vh_state:failed/);
+    // Retry path works: failed → queued
+    const retried = await scanStorage.retryScanJob(job.id);
+    expect(retried?.state).toBe("queued");
+    // Not marked current / no empty completion
+    const proj = await (await import("../../infra/db/index.js")).getDb<
+      { current: string | null }[]
+    >`SELECT current_scan_job_id AS current FROM projects WHERE id = ${projectId}::uuid`;
+    expect(proj[0]?.current).not.toBe(job.id);
+  });
+
   it("VH ordinary failure still marks failed after grace", async () => {
     const { projectId } = await seedProject({ fullName: "acme/real-fail" });
     const job = await scanStorage.createScanJob(projectId, null);

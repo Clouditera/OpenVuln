@@ -27,11 +27,46 @@ describe("isNoScanValueFailure", () => {
     ).toBe(true);
     expect(fn("other", { source_incomplete: true })).toBe(true);
     expect(fn(null, { prepare: { reason: "partial_source" } })).toBe(true);
+    expect(fn(null, { prepare: { reason: "incomplete_source" } })).toBe(true);
   });
 
   it("does not match ordinary failures", () => {
     expect(fn("worker OOM killed", null)).toBe(false);
     expect(fn("timeout", { prepare: { reason: "sandbox_error" } })).toBe(false);
+  });
+
+  it("sandbox/capacity prepare failures are NOT no-value (task-614cf34a)", () => {
+    // Exact sonic production shape: ERR_PREPARE_FAILED + sandbox_unavailable +
+    // project_complete:false riding along. Must be false → ordinary failed, retryable.
+    expect(
+      fn(
+        JSON.stringify({
+          code: "ERR_PREPARE_FAILED",
+          message: "沙箱服务容量不足",
+          details: { phase: "prepare", reason: "sandbox_unavailable", detail: "沙箱服务容量不足" },
+        }),
+        {
+          prepare: {
+            reason: "sandbox_unavailable",
+            project_complete: false,
+          },
+        },
+      ),
+    ).toBe(false);
+    expect(fn(null, { prepare: { reason: "sandbox_unavailable", project_complete: false } })).toBe(
+      false,
+    );
+    expect(fn("沙箱服务容量不足", { prepare: { project_complete: false } })).toBe(false);
+    expect(fn("ERR_PREPARE_FAILED", null)).toBe(false);
+  });
+
+  it("bare project_complete:false without prepare.reason only counts when text is content-like", () => {
+    // content-like text → no-value
+    expect(fn("源码不完整", { prepare: { project_complete: false } })).toBe(true);
+    // infra-like text → not no-value
+    expect(fn("sandbox service unavailable", { prepare: { project_complete: false } })).toBe(
+      false,
+    );
   });
 });
 

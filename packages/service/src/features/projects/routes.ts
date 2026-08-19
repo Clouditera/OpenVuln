@@ -67,7 +67,8 @@ projectsRouter.get("/:projectId/scans", requireAuth, async (c) => {
   return c.json({
     scans: scans.map((s) => ({
       id: s.id,
-      state: s.state,
+      // Public user-state: failed → scanning (fish No.2016 / task-614cf34a)
+      state: service.toPublicScanState(s.state),
       commit_sha: s.commit_sha,
       git_ref: (s as unknown as Record<string, unknown>).git_ref ?? null,
       findings_so_far: s.findings_so_far,
