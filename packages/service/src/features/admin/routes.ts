@@ -181,12 +181,19 @@ adminRouter.post("/scan-jobs/:jobId/resync", async (c) => {
         message: "VH 任务处于 cancelled（暂停）状态，未在跑也不可收割。在 VH 继续跑完后再 Resync。",
       });
     }
+    if (result.reason === "no_vh_task") {
+      throw new AppError("ERR_CONFLICT", {
+        reason: "no_vh_task",
+        message:
+          "该任务没有绑定 VH 任务（派发时就失败）。只能 Retry 重扫，或 Delete 清掉该版本。",
+      });
+    }
     if (result.reason === "not_resyncable") {
       const st = (result as { vhState?: string }).vhState ?? "?";
       throw new AppError("ERR_CONFLICT", {
         reason: "not_resyncable",
         vh_state: st,
-        message: `当前状态（${st}）不在中态（scanning/queued）时才能 Resync。`,
+        message: `仅 failed / completed 的任务可 Resync，当前状态是 ${st}（在队/在扫的不用 Resync，等它跑完即可）。`,
       });
     }
     throw new AppError("ERR_INTERNAL", { reason: result.reason });
