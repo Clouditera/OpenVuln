@@ -773,9 +773,24 @@ async function syncCompletedFindings(
  * Admin force-resync: failed job whose VH task is completed → full sync.
  * Returns result descriptor for HTTP layer.
  */
-export async function adminResyncScanJob(
-  jobId: string,
-): Promise<{ ok: true; publicCount: number } | { ok: false; reason: string; vhState?: string }> {
+export type AdminResyncResult =
+  | { ok: true; action: "follow"; vhState: string }
+  | { ok: true; action: "harvest"; publicCount: number }
+  | { ok: false; reason: "not_found" | "no_vh_task" | "not_resyncable" | "vh_still_failed" | "vh_gone" | "vh_cancelled"; vhState?: string }
+  | { ok: false; reason: string };
+
+/** VH task states that mean "alive and working" → resume following. */
+const VH_LIVE_STATES = new Set(["queued", "preparing", "running", "paused"]);
+
+/**
+ * Admin resync, routed by the VH task's current reality (task-28a85e46):
+ * - VH running/preparing/queued/paused → failed OV job flips back to `scanning`,
+ *   poller re-follows the SAME vh_task_id (no new VH task, progress kept);
+ * - VH completed → harvest findings + artifacts as before;
+ * - VH failed → explicit not-harvestable;
+ * - VH 404 → task gone (caller surfaces Retry/Delete guidance).
+ */
+export async function adminResyncScanJob(jobId: string): Promise<AdminResyncResult> {
   const job = await storage.getScanJob(jobId);
   if (!job) return { ok: false, reason: "not_found" };
   // Allow failed + completed (re-pull plaintext / recover empty sync)
@@ -789,12 +804,35 @@ export async function adminResyncScanJob(
   try {
     ({ state } = await vh.getTask(job.vulnhunter_task_id));
   } catch (err) {
+    if (isVhTaskGoneError(err)) {
+      return { ok: false, reason: "vh_gone" };
+    }
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, reason: `vh_unreachable: ${msg.slice(0, 200)}` };
   }
 
+  if (VH_LIVE_STATES.has(state)) {
+    // Follow: only meaningful for a failed OV job (completed has nothing to re-follow —
+    // VH can't go back to running after completed; if it somehow reports live we refuse).
+    if (job.state !== "failed") {
+      return { ok: false, reason: "not_resyncable", vhState: job.state };
+    }
+    const revived = await storage.reviveFailedForResync(job.id);
+    if (!revived) return { ok: false, reason: "not_resyncable", vhState: "revive_failed" };
+    logger.info(
+      { jobId: job.id, vhTaskId: job.vulnhunter_task_id, vhState: state },
+      "Admin resync → follow (failed job back to scanning, same VH task)",
+    );
+    return { ok: true, action: "follow", vhState: state };
+  }
+
+  if (state === "cancelled") {
+    // VH-side cancelled (paused) tasks are not harvestable either; tell the admin plainly.
+    return { ok: false, reason: "vh_cancelled", vhState: state };
+  }
+
   if (state !== "completed") {
-    return { ok: false, reason: "vh_not_completed", vhState: state };
+    return { ok: false, reason: "vh_still_failed", vhState: state };
   }
 
   // failed jobs: revive scanning flag; completed: syncCompletedFindings re-marks completed
@@ -803,7 +841,7 @@ export async function adminResyncScanJob(
   }
   const publicCount = await syncCompletedFindings(job.id, job.project_id, job.vulnhunter_task_id);
   logger.info({ jobId: job.id, publicCount }, "Admin resync completed");
-  return { ok: true, publicCount };
+  return { ok: true, action: "harvest", publicCount };
 }
 
 /** Delete VH task only (no OV row change). 404 acceptable. */

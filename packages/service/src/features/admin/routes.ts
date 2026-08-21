@@ -147,9 +147,10 @@ adminRouter.post("/scan-jobs/:jobId/retry", async (c) => {
 });
 
 /**
- * POST /api/admin/scan-jobs/:id/resync
- * Manual recovery: failed OV job whose VH task is already completed → full sync.
- * 409 if VH is not completed (reports real VH state).
+ * POST /api/admin/scan-jobs/:id/resync — routed by VH task reality (task-28a85e46).
+ * - VH running/preparing/queued/paused → failed OV job back to `scanning`, poller re-follows same task
+ * - VH completed → harvest findings + artifacts as before
+ * - VH failed / cancelled / 404 → explicit 409 with guidance
  */
 adminRouter.post("/scan-jobs/:jobId/resync", async (c) => {
   const jobId = c.req.param("jobId");
@@ -158,15 +159,57 @@ adminRouter.post("/scan-jobs/:jobId/resync", async (c) => {
     if (result.reason === "not_found") {
       throw new AppError("ERR_NOT_FOUND", { resource: "scan_job" });
     }
-    if (result.reason === "vh_not_completed" || result.reason === "not_failed") {
+    if (result.reason === "vh_gone") {
       throw new AppError("ERR_CONFLICT", {
-        reason: result.reason,
-        vh_state: result.vhState ?? null,
+        reason: "vh_task_gone",
+        message:
+          "VH 任务已不存在（404）。可 Retry 重新扫描，或 Delete 清掉该版本释放同 SHA 锁。",
+      });
+    }
+    if (result.reason === "vh_still_failed") {
+      const vh = (result as { vhState?: string }).vhState ?? "failed";
+      throw new AppError("ERR_CONFLICT", {
+        reason: "vh_still_failed",
+        vh_state: vh,
+        message: `VH 任务仍为 ${vh}，暂不可收割。去 VH 处理后续跑/重跑后再 Resync，或 Retry 重扫。`,
+      });
+    }
+    if (result.reason === "vh_cancelled") {
+      throw new AppError("ERR_CONFLICT", {
+        reason: "vh_cancelled",
+        vh_state: "cancelled",
+        message: "VH 任务处于 cancelled（暂停）状态，未在跑也不可收割。在 VH 继续跑完后再 Resync。",
+      });
+    }
+    if (result.reason === "not_resyncable") {
+      const st = (result as { vhState?: string }).vhState ?? "?";
+      throw new AppError("ERR_CONFLICT", {
+        reason: "not_resyncable",
+        vh_state: st,
+        message: `当前状态（${st}）不在中态（scanning/queued）时才能 Resync。`,
       });
     }
     throw new AppError("ERR_INTERNAL", { reason: result.reason });
   }
-  return c.json({ ok: true, public_count: result.publicCount });
+
+  const job = await scanStorage.getScanJob(jobId);
+  if (result.action === "follow") {
+    await writeAudit("resync_follow", "scan_job", jobId, {
+      project_id: job?.project_id ?? null,
+      vh_state: result.vhState,
+    });
+    return c.json({
+      ok: true,
+      action: "follow",
+      vh_state: result.vhState,
+      message: `VH 任务${result.vhState === "running" ? "正在跑" : "已排队/准备中"}，OV 已拨回 scanning 重新跟随（同一条 VH 任务，进度不清零）。`,
+    });
+  }
+  await writeAudit("resync_harvest", "scan_job", jobId, {
+    project_id: job?.project_id ?? null,
+    public_count: result.publicCount,
+  });
+  return c.json({ ok: true, action: "harvest", public_count: result.publicCount });
 });
 
 /**

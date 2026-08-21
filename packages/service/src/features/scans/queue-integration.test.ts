@@ -5,7 +5,7 @@ import {
   seedProject,
   type TestContext,
 } from "../../test/setup-db.js";
-import { scanStorage, scanQueueInternal } from "./index.js";
+import { scanStorage, adminResyncScanJob, scanQueueInternal } from "./index.js";
 import { findingsStorage } from "../findings/index.js";
 
 describe("scan queue integration", () => {
@@ -458,5 +458,103 @@ describe("admin direct submissions", () => {
     const b2 = (await second.json()) as { deduped?: boolean; job_id: string };
     expect(b2.deduped).toBe(true);
     expect(b2.job_id).toBe(b1.job_id);
+  });
+});
+
+describe("admin resync — routed by VH reality (task-28a85e46)", () => {
+  let ctx: TestContext;
+
+  beforeAll(async () => {
+    ctx = await setupTestApp();
+  });
+
+  beforeEach(async () => {
+    await cleanTables();
+  });
+
+  async function seedFailedJob(fullName: string) {
+    const { projectId } = await seedProject({ fullName });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
+    await scanQueueInternal.dispatchOnce(2);
+    const scanning = await scanStorage.getScanJob(job.id);
+    const vhTaskId = scanning!.vulnhunter_task_id!;
+    // ordinary failure → failed after grace
+    ctx.mockVh.forceFailed(vhTaskId, { failureReason: "worker OOM killed" });
+    await scanQueueInternal.pollOnce(1);
+    const failed = await scanStorage.getScanJob(job.id);
+    expect(failed?.state).toBe("failed");
+    return { projectId, jobId: job.id, vhTaskId };
+  }
+
+  it("VH running → follow: failed job back to scanning, same vh_task_id", async () => {
+    const { jobId, vhTaskId } = await seedFailedJob("acme/resync-follow");
+    ctx.mockVh.forceState(vhTaskId, "running");
+    const r = await adminResyncScanJob(jobId);
+    expect(r).toMatchObject({ ok: true, action: "follow" });
+    const after = await scanStorage.getScanJob(jobId);
+    expect(after?.state).toBe("scanning");
+    expect(after?.vulnhunter_task_id).toBe(vhTaskId); // same binding, no new VH task
+    expect(after?.fail_reason_internal).toBeNull();
+  });
+
+  it("follow → VH later completes → normal harvest pipeline", async () => {
+    const { jobId, projectId, vhTaskId } = await seedFailedJob("acme/resync-follow-done");
+    ctx.mockVh.forceState(vhTaskId, "running");
+    await adminResyncScanJob(jobId);
+    // poller follows; mock auto-completes after completeAfterMs — force it now
+    ctx.mockVh.forceState(vhTaskId, "completed");
+    await scanQueueInternal.pollOnce(3);
+    const done = await scanStorage.getScanJob(jobId);
+    expect(done?.state).toBe("completed");
+    expect(done?.findings_so_far).toBe(3); // mock findings harvested
+    const counts = await findingsStorage.severityCounts(projectId);
+    expect(counts.critical + counts.high + counts.medium).toBe(3);
+  });
+
+  it("VH completed → harvest as before (no regression)", async () => {
+    const { jobId, vhTaskId } = await seedFailedJob("acme/resync-harvest");
+    ctx.mockVh.forceState(vhTaskId, "completed");
+    const r = await adminResyncScanJob(jobId);
+    expect(r).toMatchObject({ ok: true, action: "harvest", publicCount: 3 });
+    const after = await scanStorage.getScanJob(jobId);
+    expect(after?.state).toBe("completed");
+    expect(after?.findings_so_far).toBe(3);
+  });
+
+  it("VH still failed → explicit vh_still_failed", async () => {
+    const { jobId, vhTaskId } = await seedFailedJob("acme/resync-still-failed");
+    ctx.mockVh.forceFailed(vhTaskId, { failureReason: "still broken" });
+    const r = await adminResyncScanJob(jobId);
+    expect(r).toMatchObject({ ok: false, reason: "vh_still_failed", vhState: "failed" });
+    const after = await scanStorage.getScanJob(jobId);
+    expect(after?.state).toBe("failed"); // untouched
+  });
+
+  it("VH 404 → explicit vh_gone (suggest Retry/Delete at route layer)", async () => {
+    const { jobId, vhTaskId } = await seedFailedJob("acme/resync-gone");
+    ctx.mockVh.forceGone(vhTaskId);
+    const r = await adminResyncScanJob(jobId);
+    expect(r).toMatchObject({ ok: false, reason: "vh_gone" });
+    const after = await scanStorage.getScanJob(jobId);
+    expect(after?.state).toBe("failed"); // resync never auto-deletes
+  });
+
+  it("OV job already in flight → not_resyncable", async () => {
+    const { projectId } = await seedProject({ fullName: "acme/resync-inflight" });
+    const job = await scanStorage.createScanJob(projectId, null);
+    await scanStorage.approveScanJob(job.id);
+    await scanQueueInternal.dispatchOnce(2);
+    const r = await adminResyncScanJob(job.id);
+    expect(r).toMatchObject({ ok: false, reason: "not_resyncable", vhState: "scanning" });
+  });
+
+  it("VH cancelled → explicit vh_cancelled, job untouched", async () => {
+    const { jobId, vhTaskId } = await seedFailedJob("acme/resync-cancelled");
+    ctx.mockVh.forceState(vhTaskId, "cancelled");
+    const r = await adminResyncScanJob(jobId);
+    expect(r).toMatchObject({ ok: false, reason: "vh_cancelled" });
+    const after = await scanStorage.getScanJob(jobId);
+    expect(after?.state).toBe("failed");
   });
 });
