@@ -315,6 +315,195 @@ describe("auto-approve", () => {
   });
 });
 
+describe("auto-approve scheduler (task-130fcbfa)", () => {
+  let ctx: TestContext;
+
+  beforeAll(async () => {
+    ctx = await setupTestApp();
+  });
+
+  beforeEach(async () => {
+    await cleanTables();
+    const { updateScanConfig } = await import("./config-storage.js");
+    await updateScanConfig({
+      auto_approve_enabled: true,
+      auto_approve_strategy: "fifo",
+      auto_approve_schedule_mode: "off",
+      auto_approve_interval_minutes: 10,
+      auto_approve_daily_at: "09:00",
+    });
+  });
+
+  it("tick approves at most (concurrency - inFlight) pending jobs", async () => {
+    const { updateScanConfig } = await import("./config-storage.js");
+    await updateScanConfig({ scan_concurrency: 2 });
+    // one job already in flight → 1 slot
+    const p0 = await seedProject({ fullName: "acme/sched-busy", stars: 50 });
+    const j0 = await scanStorage.createScanJob(p0.projectId, null);
+    await scanStorage.approveScanJob(j0.id);
+    await scanQueueInternal.dispatchOnce(2);
+    expect((await scanStorage.getScanJob(j0.id))?.state).toBe("scanning");
+
+    // 3 pending, stars descending
+    const lo = await seedProject({ fullName: "acme/sched-lo", stars: 1 });
+    await scanStorage.createScanJob(lo.projectId, null);
+    const hi = await seedProject({ fullName: "acme/sched-hi", stars: 900 });
+    await scanStorage.createScanJob(hi.projectId, null);
+    const mid = await seedProject({ fullName: "acme/sched-mid", stars: 10 });
+    await scanStorage.createScanJob(mid.projectId, null);
+
+    const r = await scanQueueInternal.autoApproveTick("test");
+    expect(r.slots).toBe(1);
+    expect(r.approved).toBe(1);
+    // strategy stars_desc default? we set fifo in beforeEach → oldest pending wins.
+    // All three created just now; verify exactly one approved, others still pending
+    const pending = await scanStorage.listPendingReviewWithStars();
+    expect(pending).toHaveLength(2);
+    const queued = await scanStorage.listQueue(50);
+    expect(queued.filter((q) => q.state === "queued")).toHaveLength(1);
+  });
+
+  it("full in-flight → approves nothing", async () => {
+    const { updateScanConfig } = await import("./config-storage.js");
+    await updateScanConfig({ scan_concurrency: 1 });
+    const p0 = await seedProject({ fullName: "acme/sched-full", stars: 50 });
+    const j0 = await scanStorage.createScanJob(p0.projectId, null);
+    await scanStorage.approveScanJob(j0.id);
+    await scanQueueInternal.dispatchOnce(1);
+
+    const p1 = await seedProject({ fullName: "acme/sched-wait", stars: 1 });
+    await scanStorage.createScanJob(p1.projectId, null);
+
+    const r = await scanQueueInternal.autoApproveTick("test");
+    expect(r).toMatchObject({ approved: 0, slots: 0 });
+    const still = await scanStorage.listPendingReviewWithStars();
+    expect(still).toHaveLength(1);
+  });
+
+  it("off mode → scheduler never fires; interval mode fires when due", async () => {
+    const { updateScanConfig } = await import("./config-storage.js");
+    const p = await seedProject({ fullName: "acme/sched-off", stars: 1 });
+    await scanStorage.createScanJob(p.projectId, null);
+
+    // off → nothing approved
+    await scanQueueInternal.autoApproveSchedulerTick();
+    expect(await scanStorage.listPendingReviewWithStars()).toHaveLength(1);
+
+    // interval 1min, lastRun in future → not due
+    await updateScanConfig({ auto_approve_schedule_mode: "interval", auto_approve_interval_minutes: 60 });
+    // lastRun=0 → due immediately... to test "not due", set lastRun to now via a due tick first is complex;
+    // instead verify: interval due (lastRun=0) approves everything
+    await scanQueueInternal.autoApproveSchedulerTick();
+    expect(await scanStorage.listPendingReviewWithStars()).toHaveLength(0);
+  });
+
+  it("daily mode fires only at HH:MM (Asia/Shanghai), once per day", async () => {
+    const { updateScanConfig } = await import("./config-storage.js");
+    const now = scanQueueInternal.shanghaiNow();
+    // configure daily at current Shanghai HH:MM → due now
+    await updateScanConfig({ auto_approve_schedule_mode: "daily", auto_approve_daily_at: now.hhmm });
+    const p = await seedProject({ fullName: "acme/sched-daily", stars: 1 });
+    await scanStorage.createScanJob(p.projectId, null);
+    await scanQueueInternal.autoApproveSchedulerTick();
+    expect(await scanStorage.listPendingReviewWithStars()).toHaveLength(0);
+    // second tick same minute → no double-run (already drained, but state guard is lastDailyRunDate)
+    const p2 = await seedProject({ fullName: "acme/sched-daily2", stars: 2 });
+    await scanStorage.createScanJob(p2.projectId, null);
+    await scanQueueInternal.autoApproveSchedulerTick();
+    expect(await scanStorage.listPendingReviewWithStars()).toHaveLength(1);
+  });
+
+  it("submit no longer auto-approves (old path removed)", async () => {
+    // enabled + interval — but submit must not approve by itself
+    const { updateScanConfig } = await import("./config-storage.js");
+    await updateScanConfig({ auto_approve_schedule_mode: "interval", auto_approve_interval_minutes: 1 });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/collaborators/")) {
+          return new Response(JSON.stringify({ permission: "admin" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("/commits/")) {
+          return new Response(JSON.stringify({ sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            id: 990002,
+            name: "sched-submit",
+            full_name: "acme/sched-submit",
+            private: false,
+            html_url: "https://github.com/acme/sched-submit",
+            description: null,
+            language: null,
+            stargazers_count: 1,
+            default_branch: "main",
+            owner: { login: "acme" },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const { submitProject } = await import("../projects/service.js");
+    // identity row for the submitting user (repo_access_grants FK)
+    const authStorage = (await import("../auth/index.js")).authStorage;
+    await authStorage.upsertIdentity({ userId: 1, login: "acme", avatarUrl: null });
+    await submitProject(
+      "https://github.com/acme/sched-submit",
+      ctx.config,
+      { githubUserId: 1, login: "acme" },
+    );
+
+    // submitted job stays pending — scheduled tick is the only auto path now
+    const pending = await scanStorage.listPendingReviewWithStars();
+    expect(pending.some((x) => x.full_name === "acme/sched-submit")).toBe(true);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("admin queue pagination (task-99f770f3)", () => {
+  let ctx: TestContext;
+  const ADMIN = { authorization: "Bearer test-admin-token" };
+
+  beforeAll(async () => {
+    ctx = await setupTestApp();
+  });
+
+  beforeEach(async () => {
+    await cleanTables();
+  });
+
+  it("pages through queue with total", async () => {
+    for (let i = 0; i < 7; i++) {
+      const p = await seedProject({ fullName: `acme/page-${i}`, stars: i });
+      const j = await scanStorage.createScanJob(p.projectId, null);
+      await scanStorage.approveScanJob(j.id); // queued
+    }
+    const r1 = await ctx.app.request("/api/admin/queue?page=1&page_size=3", { headers: ADMIN });
+    expect(r1.status).toBe(200);
+    const b1 = (await r1.json()) as { items: unknown[]; total: number; page: number; page_size: number };
+    expect(b1.total).toBe(7);
+    expect(b1.items).toHaveLength(3);
+    expect(b1.page).toBe(1);
+
+    const r3 = await ctx.app.request("/api/admin/queue?page=3&page_size=3", { headers: ADMIN });
+    const b3 = (await r3.json()) as { items: unknown[]; total: number };
+    expect(b3.items).toHaveLength(1);
+
+    // ordering: stars desc within queued → page-6 first
+    const b1first = b1.items[0] as { project_full_name: string };
+    expect(b1first.project_full_name).toBe("acme/page-6");
+  });
+});
+
 describe("admin direct submissions", () => {
   let ctx: TestContext;
   const ADMIN = { authorization: "Bearer test-admin-token" };

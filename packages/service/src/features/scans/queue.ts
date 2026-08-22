@@ -911,6 +911,105 @@ export async function cancelScanJobVh(
 let teardownTimer: ReturnType<typeof setInterval> | null = null;
 let teardownBusy = false;
 
+// ---- Auto-approve scheduler (task-130fcbfa) ----
+let autoApproveTimer: ReturnType<typeof setInterval> | null = null;
+let autoApproveBusy = false;
+/** Last successful scheduled run (ms epoch) — interval mode cadence. */
+let lastAutoApproveRun = 0;
+/** Shanghai date (YYYY-MM-DD) of the last daily run — one run per day. */
+let lastDailyRunDate = "";
+
+function shanghaiNow(): { hhmm: string; date: string } {
+  // Asia/Shanghai is fixed UTC+8 (no DST)
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return { hhmm: `${get("hour")}:${get("minute")}`, date: `${get("year")}-${get("month")}-${get("day")}` };
+}
+
+/**
+ * One scheduled auto-approve tick: approve at most (scan_concurrency - inFlight)
+ * pending jobs, ordered by the configured strategy. Never touches manual approve.
+ */
+export async function autoApproveTick(trigger = "scheduled"): Promise<{ approved: number; slots: number }> {
+  const { getScanConfig } = await import("./config-storage.js");
+  const cfg = await getScanConfig();
+  if (!cfg.auto_approve_enabled) return { approved: 0, slots: 0 };
+
+  const inFlight = await storage.countInFlight();
+  const slots = Math.max(0, cfg.scan_concurrency - inFlight);
+  if (slots === 0) {
+    logger.info({ inFlight, concurrency: cfg.scan_concurrency }, "Auto-approve tick: full, nothing approved");
+    return { approved: 0, slots: 0 };
+  }
+
+  const pending = await storage.listPendingReviewWithStars();
+  if (pending.length === 0) return { approved: 0, slots };
+
+  const strategy = cfg.auto_approve_strategy ?? "fifo";
+  const sorted = [...pending].sort((a, b) => {
+    if (strategy === "stars_desc") {
+      const starDiff = (b.stars ?? 0) - (a.stars ?? 0);
+      if (starDiff !== 0) return starDiff;
+    }
+    return a.created_at.getTime() - b.created_at.getTime();
+  });
+
+  const { writeAudit } = await import("../admin/audit.js");
+  let approved = 0;
+  for (const job of sorted) {
+    if (approved >= slots) break;
+    const row = await storage.approveScanJob(job.id);
+    if (row) {
+      approved += 1;
+      await writeAudit("auto_approve", "scan_job", job.id, {
+        strategy,
+        trigger,
+        project: job.full_name,
+        stars: job.stars ?? 0,
+      }).catch(() => {});
+    }
+  }
+  logger.info({ approved, slots, inFlight, strategy, trigger }, "Auto-approve tick done");
+  return { approved, slots };
+}
+
+async function autoApproveSchedulerTick(): Promise<void> {
+  if (autoApproveBusy) return;
+  autoApproveBusy = true;
+  try {
+    const { getScanConfig } = await import("./config-storage.js");
+    const cfg = await getScanConfig();
+    if (!cfg.auto_approve_enabled) return;
+    const mode = cfg.auto_approve_schedule_mode ?? "off";
+    const now = Date.now();
+    if (mode === "interval") {
+      const everyMs = (cfg.auto_approve_interval_minutes ?? 10) * 60_000;
+      if (now - lastAutoApproveRun < everyMs) return;
+      lastAutoApproveRun = now;
+      await autoApproveTick("scheduled:interval");
+    } else if (mode === "daily") {
+      const { hhmm, date } = shanghaiNow();
+      if (hhmm !== (cfg.auto_approve_daily_at ?? "09:00")) return;
+      if (lastDailyRunDate === date) return;
+      lastDailyRunDate = date;
+      await autoApproveTick("scheduled:daily");
+    }
+    // mode off → nothing
+  } catch (err) {
+    logger.error({ err }, "auto-approve scheduler tick failed");
+  } finally {
+    autoApproveBusy = false;
+  }
+}
+
 export function startScanLoops(config: ServiceConfig): void {
   if (running) return;
   running = true;
@@ -951,6 +1050,11 @@ export function startScanLoops(config: ServiceConfig): void {
   pollerTimer = setInterval(runPoll, config.scan.pollerIntervalMs);
   // Teardown on dispatcher cadence (default 10s)
   teardownTimer = setInterval(runTeardown, config.scan.dispatcherIntervalMs);
+  // Auto-approve scheduler: check every 20s whether a scheduled run is due
+  // (config re-read each tick — Settings changes apply without restart)
+  autoApproveTimer = setInterval(() => {
+    void autoApproveSchedulerTick();
+  }, 20_000);
   logger.info(
     {
       concurrency: getEffectiveConcurrency(config.scan.concurrency),
@@ -966,19 +1070,25 @@ export function stopScanLoops(): void {
   if (dispatcherTimer) clearInterval(dispatcherTimer);
   if (pollerTimer) clearInterval(pollerTimer);
   if (teardownTimer) clearInterval(teardownTimer);
+  if (autoApproveTimer) clearInterval(autoApproveTimer);
   dispatcherTimer = null;
   pollerTimer = null;
   teardownTimer = null;
+  autoApproveTimer = null;
   running = false;
   dispatchBusy = false;
   pollBusy = false;
   teardownBusy = false;
+  autoApproveBusy = false;
 }
 
 export const _internal = {
   dispatchOnce,
   pollOnce,
   teardownOnce,
+  autoApproveTick,
+  autoApproveSchedulerTick,
+  shanghaiNow,
   syncCompletedFindings,
   countIngestibleFromList,
   mapFindingSeverity,
@@ -997,5 +1107,9 @@ export const _internal = {
     pollNotBefore = 0;
     dispatchNotBefore = 0;
     runtimeConcurrency = null;
+  },
+  resetSchedulerForTests() {
+    lastAutoApproveRun = 0;
+    lastDailyRunDate = "";
   },
 };

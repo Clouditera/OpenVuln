@@ -4,6 +4,7 @@ export {
   startScanLoops,
   stopScanLoops,
   adminResyncScanJob,
+  autoApproveTick,
   getScanConfigView,
   setRuntimeConcurrency,
   _internal as scanQueueInternal,

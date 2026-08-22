@@ -354,6 +354,43 @@ export async function listQueue(limit = 100): Promise<
   `;
 }
 
+/** Paged queue listing (task-99f770f3): same ordering, returns page slice + total. */
+export async function listQueuePage(
+  page: number,
+  pageSize: number,
+): Promise<{ items: Array<ScanJobRow & { project_full_name: string }>; total: number }> {
+  const db = getDb();
+  const offset = (page - 1) * pageSize;
+  const items = await db<(ScanJobRow & { project_full_name: string })[]>`
+    SELECT
+      j.id::text, j.project_id::text, j.vulnhunter_task_id::text,
+      j.state, j.commit_sha, j.attempt, j.fail_reason_internal,
+      COALESCE(j.findings_so_far, 0) AS findings_so_far,
+      COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
+      j.created_at, j.started_at, j.finished_at,
+      p.full_name AS project_full_name
+    FROM scan_jobs j
+    JOIN projects p ON p.id = j.project_id
+    WHERE j.state IN ('queued', 'dispatching', 'scanning', 'failed')
+    ORDER BY
+      CASE j.state
+        WHEN 'scanning' THEN 0
+        WHEN 'dispatching' THEN 1
+        WHEN 'queued' THEN 2
+        ELSE 3
+      END,
+      p.stars DESC,
+      j.created_at ASC
+    LIMIT ${pageSize} OFFSET ${offset}
+  `;
+  const countRows = await db<{ n: string }[]>`
+    SELECT count(*)::text AS n FROM scan_jobs j
+    JOIN projects p ON p.id = j.project_id
+    WHERE j.state IN ('queued', 'dispatching', 'scanning', 'failed')
+  `;
+  return { items, total: Number(countRows[0]?.n ?? 0) };
+}
+
 export async function lastScanCreatedAt(projectId: string): Promise<Date | null> {
   const db = getDb();
   const rows = await db<{ created_at: Date }[]>`

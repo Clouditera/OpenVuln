@@ -15,4 +15,8 @@ export interface QueueItem {
 
 export interface QueueResponse {
   items: QueueItem[];
+  /** Paged listing (task-99f770f3) */
+  total?: number;
+  page?: number;
+  page_size?: number;
 }

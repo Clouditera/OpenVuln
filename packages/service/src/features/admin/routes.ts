@@ -109,9 +109,14 @@ adminRouter.get("/projects", async (c) => {
   });
 });
 
-// GET /api/admin/queue
+// GET /api/admin/queue?page=&page_size= — paged (task-99f770f3); total included
 adminRouter.get("/queue", async (c) => {
-  const items = await scanStorage.listQueue();
+  const page = Math.max(1, Number(c.req.query("page") ?? "1") || 1);
+  const pageSize = Math.min(
+    500,
+    Math.max(1, Number(c.req.query("page_size") ?? "100") || 100),
+  );
+  const { items, total } = await scanStorage.listQueuePage(page, pageSize);
   const body: QueueResponse = {
     items: items.map((j) => ({
       id: j.id,
@@ -125,6 +130,9 @@ adminRouter.get("/queue", async (c) => {
       started_at: j.started_at?.toISOString() ?? null,
       finished_at: j.finished_at?.toISOString() ?? null,
     })),
+    total,
+    page,
+    page_size: pageSize,
   };
   return c.json(body);
 });
@@ -502,6 +510,7 @@ adminRouter.put("/scan-config", async (c) => {
     "audit_focus", "output_language", "vuln_focus",
     "enable_dynamic_verify", "enable_dynamic_exploit",
     "scan_concurrency", "auto_approve_enabled", "auto_approve_strategy",
+    "auto_approve_schedule_mode", "auto_approve_interval_minutes", "auto_approve_daily_at",
   ];
   for (const k of allowed) {
     if (k in body) updates[k] = body[k];
@@ -526,6 +535,27 @@ adminRouter.put("/scan-config", async (c) => {
         field: "auto_approve_strategy",
         reason: "must_be_stars_desc_or_fifo",
         message: "auto_approve_strategy must be stars_desc or fifo",
+      });
+    }
+    if (msg.startsWith("invalid_auto_approve_schedule_mode:")) {
+      throw new AppError("ERR_VALIDATION", {
+        field: "auto_approve_schedule_mode",
+        reason: "must_be_off_interval_daily",
+        message: "auto_approve_schedule_mode must be off | interval | daily",
+      });
+    }
+    if (msg.startsWith("invalid_auto_approve_interval_minutes:")) {
+      throw new AppError("ERR_VALIDATION", {
+        field: "auto_approve_interval_minutes",
+        reason: "must_be_int_1_1440",
+        message: "auto_approve_interval_minutes must be an integer 1–1440",
+      });
+    }
+    if (msg.startsWith("invalid_auto_approve_daily_at:")) {
+      throw new AppError("ERR_VALIDATION", {
+        field: "auto_approve_daily_at",
+        reason: "must_be_hhmm",
+        message: "auto_approve_daily_at must be HH:MM (00:00–23:59)",
       });
     }
     throw e;
