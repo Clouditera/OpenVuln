@@ -64,7 +64,10 @@ adminRouter.get("/projects", async (c) => {
   let paramIdx = 1;
 
   if (stateFilter) {
-    baseWhere.push(`latest_state = $${paramIdx++}`);
+    // Can't reference the SELECT alias in WHERE — repeat the latest-scan subquery
+    baseWhere.push(
+      `(SELECT s.state FROM scan_jobs s WHERE s.project_id = p.id ORDER BY s.created_at DESC LIMIT 1) = $${paramIdx++}`,
+    );
     params.push(stateFilter);
   }
   if (submitterFilter) {

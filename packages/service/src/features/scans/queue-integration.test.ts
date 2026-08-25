@@ -747,3 +747,38 @@ describe("admin resync — routed by VH reality (task-28a85e46)", () => {
     expect(after?.state).toBe("failed");
   });
 });
+
+describe("admin projects state filter (latest_state bug)", () => {
+  let ctx: TestContext;
+  const ADMIN = { authorization: "Bearer test-admin-token" };
+
+  beforeAll(async () => {
+    ctx = await setupTestApp();
+  });
+
+  beforeEach(async () => {
+    await cleanTables();
+  });
+
+  it("state=completed returns only projects whose latest scan is completed", async () => {
+    const a = await seedProject({ fullName: "acme/done-project" });
+    const ja = await scanStorage.createScanJob(a.projectId, "sha-done");
+    await scanStorage.approveScanJob(ja.id);
+    await scanStorage.markCompleted(ja.id);
+
+    const b = await seedProject({ fullName: "acme/pending-project" });
+    await scanStorage.createScanJob(b.projectId, null); // stays pending_review
+
+    const res = await ctx.app.request("/api/admin/projects?state=completed", { headers: ADMIN });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<{ full_name: string; latest_state: string }> };
+    expect(body.items.length).toBe(1);
+    expect(body.items[0].full_name).toBe("acme/done-project");
+    expect(body.items[0].latest_state).toBe("completed");
+
+    // no filter → both
+    const res2 = await ctx.app.request("/api/admin/projects", { headers: ADMIN });
+    const body2 = (await res2.json()) as { items: unknown[] };
+    expect(body2.items.length).toBe(2);
+  });
+});
