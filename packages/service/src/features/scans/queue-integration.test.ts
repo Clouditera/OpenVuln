@@ -783,3 +783,122 @@ describe("admin projects state filter (latest_state bug)", () => {
     expect(body2.items.length).toBe(2);
   });
 });
+
+describe("fork repos are not owned (task-422a70bf)", () => {
+  let ctx: TestContext;
+
+  beforeAll(async () => {
+    ctx = await setupTestApp();
+  });
+
+  beforeEach(async () => {
+    await cleanTables();
+    vi.unstubAllGlobals();
+    const { resetForkFlagCacheForTests } = await import("../auth/permission.js");
+    resetForkFlagCacheForTests();
+    const authStorage = (await import("../auth/index.js")).authStorage;
+    await authStorage.upsertIdentity({ userId: 1, login: "forky", avatarUrl: null });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubGithubRepo(opts: { fork: boolean; upstream?: string; admin?: boolean }) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/collaborators/")) {
+          return new Response(JSON.stringify({ permission: opts.admin === false ? "read" : "admin" }), {
+            status: 200, headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("/commits/")) {
+          return new Response(JSON.stringify({ sha: "cccccccccccccccccccccccccccccccccccccccc" }), {
+            status: 200, headers: { "content-type": "application/json" },
+          });
+        }
+        // repo meta
+        return new Response(
+          JSON.stringify({
+            id: 990099,
+            name: "forked-repo",
+            full_name: "forky/forked-repo",
+            private: false,
+            fork: opts.fork,
+            ...(opts.fork
+              ? { parent: { id: 1, full_name: opts.upstream ?? "upstream/main-repo", owner: { login: "upstream" }, html_url: "https://github.com/upstream/main-repo" } }
+              : {}),
+            html_url: "https://github.com/forky/forked-repo",
+            description: null,
+            language: null,
+            stargazers_count: 1,
+            default_branch: "main",
+            owner: { login: "forky" },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+  }
+
+  it("submit of a fork is rejected with upstream pointer, even for its admin", async () => {
+    stubGithubRepo({ fork: true, upstream: "upstream/main-repo", admin: true });
+    const { submitProject } = await import("../projects/service.js");
+    await expect(
+      submitProject("https://github.com/forky/forked-repo", ctx.config, {
+        githubUserId: 1,
+        login: "forky",
+        githubToken: "tok",
+      } as never),
+    ).rejects.toMatchObject({
+      code: "ERR_FORBIDDEN",
+      context: { reason: "fork_repo_not_allowed", upstream: "upstream/main-repo" },
+    });
+  });
+
+  it("non-fork submit still passes (no regression)", async () => {
+    stubGithubRepo({ fork: false });
+    const { submitProject } = await import("../projects/service.js");
+    const res = await submitProject("https://github.com/forky/forked-repo", ctx.config, {
+      githubUserId: 1,
+      login: "forky",
+      githubToken: "tok",
+    } as never);
+    expect(res.project.full_name).toBe("forky/forked-repo");
+  });
+
+  it("owner endpoints on a fork project → 403 fork_repo_not_allowed", async () => {
+    stubGithubRepo({ fork: true, admin: true });
+    // seed an existing fork-flagged project directly in DB (存量 fork 项目)
+    const { projectStorage } = await import("../projects/index.js");
+    const project = await projectStorage.insertProject({
+      githubRepoId: 990099,
+      ownerLogin: "forky",
+      name: "forked-repo",
+      fullName: "forky/forked-repo",
+      htmlUrl: "https://github.com/forky/forked-repo",
+      description: null,
+      language: null,
+      stars: 1,
+      defaultBranch: "main",
+      submittedBy: 1,
+    });
+    // session cookie auth: use the app's test login? Simpler: call requireRepoAccess directly
+    const { requireRepoAccess } = await import("../auth/permission.js");
+    await expect(
+      requireRepoAccess(
+        { githubUserId: 1, login: "forky", githubToken: "tok" } as never,
+        "forky",
+        "forked-repo",
+        990099,
+        ctx.config,
+      ),
+    ).rejects.toMatchObject({
+      code: "ERR_FORBIDDEN",
+      context: { reason: "fork_repo_not_allowed" },
+    });
+    expect(project.id).toBeTruthy();
+  });
+});

@@ -183,6 +183,18 @@ export async function submitProject(
     });
   }
 
+  // Fork repos are not submittable (fish No.2128 / task-422a70bf) — point to upstream
+  if (meta.fork) {
+    const upstream = meta.parent?.full_name ?? meta.source?.full_name ?? null;
+    throw new AppError("ERR_FORBIDDEN", {
+      reason: "fork_repo_not_allowed",
+      upstream,
+      message: upstream
+        ? `Fork 仓库不可提交，请提交上游主仓：${upstream}`
+        : "Fork 仓库不可提交，请提交上游主仓。",
+    });
+  }
+
   // Maintainer/admin only + daily rate limit
   await requireRepoAccess(user, meta.owner.login, meta.name, meta.id, config);
   const submitCount = await authStorage.bumpSubmitCount(user.githubUserId);

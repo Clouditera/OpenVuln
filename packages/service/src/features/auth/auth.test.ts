@@ -26,6 +26,27 @@ vi.mock("./github-oauth.js", async (importOriginal) => {
   };
 });
 
+// Fork gate (task-422a70bf) hits repo meta — default all test repos to non-fork.
+vi.mock("../projects/github.js", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../projects/github.js")>();
+  return {
+    ...orig,
+    fetchRepoMeta: vi.fn().mockImplementation(async () => ({
+      id: 0,
+      name: "repo",
+      full_name: "acme/repo",
+      owner: { login: "acme" },
+      html_url: "",
+      description: null,
+      language: null,
+      stargazers_count: 0,
+      default_branch: "main",
+      private: false,
+      fork: false,
+    })),
+  };
+});
+
 describe("auth oauth state", () => {
   const secret = "test-state-secret";
 
