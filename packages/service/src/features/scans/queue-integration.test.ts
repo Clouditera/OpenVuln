@@ -771,10 +771,11 @@ describe("admin projects state filter (latest_state bug)", () => {
 
     const res = await ctx.app.request("/api/admin/projects?state=completed", { headers: ADMIN });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { items: Array<{ full_name: string; latest_state: string }> };
+    const body = (await res.json()) as { items: Array<{ full_name: string; latest_state: string }>; total: number };
     expect(body.items.length).toBe(1);
     expect(body.items[0].full_name).toBe("acme/done-project");
     expect(body.items[0].latest_state).toBe("completed");
+    expect(body.total).toBe(1);
 
     // no filter → both
     const res2 = await ctx.app.request("/api/admin/projects", { headers: ADMIN });

@@ -81,6 +81,14 @@ adminRouter.get("/projects", async (c) => {
 
   const whereClause = baseWhere.length > 0 ? `WHERE p.removed_at IS NULL AND ${baseWhere.join(" AND ")}` : "WHERE p.removed_at IS NULL";
 
+  const countRows = await db.unsafe(
+    `SELECT COUNT(*)::int AS n
+    FROM projects p
+    LEFT JOIN github_identities i ON i.user_id = p.submitted_by
+    ${whereClause}`,
+    params as (string | number)[],
+  );
+
   const rows = await db.unsafe(
     `SELECT
       p.id::text, p.full_name, p.html_url, p.submitted_by,
@@ -109,6 +117,7 @@ adminRouter.get("/projects", async (c) => {
     page,
     per_page: perPage,
     has_more: hasMore,
+    total: countRows[0]?.n ?? items.length,
   });
 });
 
