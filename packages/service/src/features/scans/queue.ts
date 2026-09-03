@@ -6,6 +6,7 @@ import { getDb } from "../../infra/db/index.js";
 import { logger } from "../../infra/logger.js";
 import { findingsStorage, harvestFindingArtifacts } from "../findings/index.js";
 import { githubApi, githubZipball, parseGitHubUrl } from "../projects/index.js";
+import { filterArchiveEntries } from "../projects/archive-filter.js";
 import {
   type VhFindingMeta,
   getVulnHunterClient,
@@ -413,7 +414,7 @@ async function dispatchOnce(concurrency: number): Promise<void> {
 
         const maxBytes = Math.max(1, cfg.vulnhunter.zipMaxMb) * 1024 * 1024;
         try {
-          const zip = await githubZipball.downloadGithubZipball({
+          let zip = await githubZipball.downloadGithubZipball({
             owner: parsed.owner,
             repo: parsed.repo,
             ref: refSha,
@@ -421,6 +422,28 @@ async function dispatchOnce(concurrency: number): Promise<void> {
             token: cfg.github.serverToken || undefined,
             timeoutMs: cfg.vulnhunter.zipDownloadTimeoutMs,
           });
+          // Archive filter (task-08627338): drop dangling symlinks / unsafe paths
+          // before VH upload; leave clean archives byte-identical; record skips.
+          try {
+            const filtered = await filterArchiveEntries(zip.buffer);
+            if (filtered.skipped.length > 0) {
+              const summary = {
+                count: filtered.skipped.length,
+                entries: filtered.skipped.slice(0, 50),
+              };
+              await storage.setSkippedEntries(job.id, summary);
+              logger.warn(
+                { jobId: job.id, project: project.full_name, ...summary },
+                "Archive filtered (dangling links / unsafe paths skipped)",
+              );
+              zip = { ...zip, buffer: filtered.buffer, bytes: filtered.buffer.length };
+            } else {
+              await storage.setSkippedEntries(job.id, null);
+            }
+          } catch (ferr) {
+            // Filter itself failed — fall back to original archive (VH will 400 if bad)
+            logger.warn({ err: ferr, jobId: job.id }, "Archive filter failed; uploading unfiltered");
+          }
           ({ taskId } = await vh.createScanTaskFromArchive({
             ...createOpts,
             archive: zip.buffer,

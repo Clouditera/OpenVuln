@@ -14,6 +14,7 @@ export interface ScanJobRow {
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
+  skipped_entries?: { count: number; entries: string[] } | null;
 }
 
 /** Accept root sql or transaction sql (postgres.js). */
@@ -98,6 +99,18 @@ export async function setCommitSha(id: string, commitSha: string | null): Promis
   const db = getDb();
   await db`
     UPDATE scan_jobs SET commit_sha = ${commitSha} WHERE id = ${id}::uuid
+  `;
+}
+
+/** Archive-filter audit trail (task-08627338): { count, entries[] } summary. */
+export async function setSkippedEntries(
+  id: string,
+  summary: { count: number; entries: string[] } | null,
+): Promise<void> {
+  const db = getDb();
+  await db`
+    UPDATE scan_jobs SET skipped_entries = ${summary ? JSON.stringify(summary) : null}::jsonb
+    WHERE id = ${id}::uuid
   `;
 }
 
@@ -336,7 +349,7 @@ export async function listQueue(limit = 100): Promise<
       j.state, j.commit_sha, j.attempt, j.fail_reason_internal,
       COALESCE(j.findings_so_far, 0) AS findings_so_far,
       COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
-      j.created_at, j.started_at, j.finished_at,
+      j.created_at, j.started_at, j.finished_at, j.skipped_entries,
       p.full_name AS project_full_name
     FROM scan_jobs j
     JOIN projects p ON p.id = j.project_id
@@ -367,7 +380,7 @@ export async function listQueuePage(
       j.state, j.commit_sha, j.attempt, j.fail_reason_internal,
       COALESCE(j.findings_so_far, 0) AS findings_so_far,
       COALESCE(j.consecutive_failures, 0) AS consecutive_failures,
-      j.created_at, j.started_at, j.finished_at,
+      j.created_at, j.started_at, j.finished_at, j.skipped_entries,
       p.full_name AS project_full_name
     FROM scan_jobs j
     JOIN projects p ON p.id = j.project_id

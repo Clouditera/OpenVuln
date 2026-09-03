@@ -8,6 +8,8 @@ export interface QueueItem {
   vulnhunter_task_id: string | null;
   attempt: number;
   fail_reason_internal: string | null;
+  /** Archive-filter audit (task-08627338) */
+  skipped_entries?: { count: number; entries: string[] } | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

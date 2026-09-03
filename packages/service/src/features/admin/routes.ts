@@ -138,6 +138,7 @@ adminRouter.get("/queue", async (c) => {
       vulnhunter_task_id: j.vulnhunter_task_id,
       attempt: j.attempt,
       fail_reason_internal: j.fail_reason_internal,
+      skipped_entries: j.skipped_entries ?? null,
       created_at: j.created_at.toISOString(),
       started_at: j.started_at?.toISOString() ?? null,
       finished_at: j.finished_at?.toISOString() ?? null,
