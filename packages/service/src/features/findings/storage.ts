@@ -168,7 +168,19 @@ export async function upsertEncryptedFinding(
   const disclosureState = input.disclosureState ?? "owner_only";
   // Pass object directly — JSON.stringify + ::jsonb double-encodes as a JSON string scalar
   // (BUG: disclosed report empty / owner expand blank). postgres.js serializes objects to jsonb.
-  const detailJson = input.detailJson === undefined ? null : input.detailJson;
+  // Sanitize NUL: pg JSON parsing rejects \u0000 in text — strip recursively, else the
+  // whole harvest poll loops forever on one finding (prod incident 2026-09-04..07).
+  const stripNul = (v: unknown): unknown => {
+    if (typeof v === "string") return v.replace(/\u0000/g, "");
+    if (Array.isArray(v)) return v.map(stripNul);
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = stripNul(val);
+      return out;
+    }
+    return v;
+  };
+  const detailJson = input.detailJson === undefined ? null : stripNul(input.detailJson);
   await sql`
     INSERT INTO findings (
       id, project_id, scan_job_id, finding_key, severity, cwe,
@@ -184,16 +196,16 @@ export async function upsertEncryptedFinding(
       ${input.severity},
       ${input.cwe},
       ${input.encPayload ?? ""},
-      ${input.title ?? null},
-      ${input.primaryFile ?? null},
+      ${stripNul(input.title ?? null)},
+      ${stripNul(input.primaryFile ?? null)},
       ${detailJson},
       ${disclosureState},
       ${input.disclosedAt ?? null},
       ${input.disclosedTitle ?? null},
       ${input.disclosedSummary ?? null},
-      ${input.disclosedReportYaml ?? null},
+      ${stripNul(input.disclosedReportYaml ?? null)},
       ${input.cvssScore ?? null},
-      ${input.cvssVector ?? null},
+      ${stripNul(input.cvssVector ?? null)},
       ${input.pocStatus ?? null},
       ${input.itemType ?? "finding"},
       ${input.vhSeverity ?? null}
