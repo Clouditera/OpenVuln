@@ -3,6 +3,7 @@ import { logger } from "../../infra/logger.js";
 import type { VulnHunterClient } from "./client.js";
 import { CookieVulnHunterClient } from "./cookie-client.js";
 import { TokenVulnHunterClient } from "./token-client.js";
+import { V3VulnHunterClient } from "./v3-client.js";
 
 export type { VulnHunterClient, VhFindingMeta, VhTaskState } from "./client.js";
 export {
@@ -10,10 +11,30 @@ export {
   isVhTaskGoneError,
   isVhTaskNotFoundBody,
 } from "./client.js";
+export { V3VulnHunterClient, recordJsonToReportYaml } from "./v3-client.js";
 
 let _client: VulnHunterClient | null = null;
 
 export function initVulnHunterClient(config: ServiceConfig): VulnHunterClient {
+  if (config.vulnhunter.apiVersion === "v3") {
+    if (!config.vulnhunter.apiToken) {
+      throw new Error("VULNHUNTER_API_TOKEN required when VULNHUNTER_API_VERSION=v3");
+    }
+    const model =
+      config.vulnhunter.modelProviderId && config.vulnhunter.modelId
+        ? { providerId: config.vulnhunter.modelProviderId, modelId: config.vulnhunter.modelId }
+        : undefined;
+    logger.info(
+      { baseUrl: config.vulnhunter.baseUrl, hasExplicitModel: Boolean(model) },
+      "VulnHunter client: V3 TOKEN mode",
+    );
+    _client = new V3VulnHunterClient({
+      baseUrl: config.vulnhunter.baseUrl,
+      apiToken: config.vulnhunter.apiToken,
+      model,
+    });
+    return _client;
+  }
   if (config.vulnhunter.authMode === "token") {
     if (!config.vulnhunter.apiToken) {
       throw new Error("VULNHUNTER_API_TOKEN required when AUTH_MODE=token");
