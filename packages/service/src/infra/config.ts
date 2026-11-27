@@ -12,6 +12,7 @@ function optionalEnv(key: string, defaultValue: string): string {
 }
 
 export type VulnHunterAuthMode = "cookie" | "token";
+export type VulnHunterApiVersion = "v2" | "v3";
 
 export interface ServiceConfig {
   port: number;
@@ -20,11 +21,14 @@ export interface ServiceConfig {
   db: { url: string };
   vulnhunter: {
     baseUrl: string;
+    apiVersion: VulnHunterApiVersion;
     authMode: VulnHunterAuthMode;
     username: string;
     password: string;
     apiToken: string;
     credentialId: string;
+    modelProviderId: string;
+    modelId: string;
 
     create: {
       scanTimeoutHours: number;
@@ -75,7 +79,12 @@ export interface ServiceConfig {
 }
 
 export function loadConfig(): ServiceConfig {
-  const authModeRaw = optionalEnv("VULNHUNTER_AUTH_MODE", "cookie");
+  const apiVersionRaw = optionalEnv("VULNHUNTER_API_VERSION", "v2").toLowerCase();
+  if (apiVersionRaw !== "v2" && apiVersionRaw !== "v3") {
+    throw new Error(`Invalid VULNHUNTER_API_VERSION: ${apiVersionRaw}`);
+  }
+  const apiVersion = apiVersionRaw as VulnHunterApiVersion;
+  const authModeRaw = optionalEnv("VULNHUNTER_AUTH_MODE", apiVersion === "v3" ? "token" : "cookie");
   if (authModeRaw !== "cookie" && authModeRaw !== "token") {
     throw new Error(`Invalid VULNHUNTER_AUTH_MODE: ${authModeRaw}`);
   }
@@ -119,11 +128,14 @@ export function loadConfig(): ServiceConfig {
     },
     vulnhunter: {
       baseUrl: optionalEnv("VULNHUNTER_BASE_URL", "http://localhost:28080"),
+      apiVersion,
       authMode,
       username: optionalEnv("VULNHUNTER_USERNAME", ""),
       password: optionalEnv("VULNHUNTER_PASSWORD", ""),
       apiToken: optionalEnv("VULNHUNTER_API_TOKEN", ""),
       credentialId: optionalEnv("VULNHUNTER_CREDENTIAL_ID", ""),
+      modelProviderId: optionalEnv("VULNHUNTER_MODEL_PROVIDER_ID", ""),
+      modelId: optionalEnv("VULNHUNTER_MODEL_ID", ""),
       create: {
         scanTimeoutHours: Number(optionalEnv("VH_SCAN_TIMEOUT_HOURS", "24")),
         maxItemsPerRecon: Number(optionalEnv("VH_MAX_ITEMS_PER_RECON", "10")),
